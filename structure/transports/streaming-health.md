@@ -211,7 +211,10 @@ the upgrade with 426 so Codex falls back to HTTP cleanly.
 
 That setting controls the client-facing upgrade only. The transparent upstream
 ChatGPT WS optimization described above is selected independently and still
-returns the same downstream SSE contract. Its WSS route checks NO_PROXY first, then selects the
+returns the same downstream SSE contract. Canonical ChatGPT input containing an
+`input_image` or `computer_screenshot` is excluded before dialing and retains
+HTTP/SSE; explicitly opted-in noncanonical gateways retain their own WS policy.
+Its WSS route checks NO_PROXY first, then selects the
 first non-empty HTTPS_PROXY, https_proxy, ALL_PROXY, or all_proxy value. HTTP_PROXY alone does not
 route WSS. Unsupported or malformed selected proxy values skip the WebSocket attempt and use the
 existing SSE path immediately; they never fall through to a lower-priority proxy or direct WebSocket

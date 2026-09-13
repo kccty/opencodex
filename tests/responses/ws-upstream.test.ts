@@ -132,7 +132,37 @@ describe("shouldUseCodexWsUpstream", () => {
     expect(shouldUseCodexWsUpstream(CODEX_URL, { method: "POST", body: "{\"stream\":true" })).toBe(false);
   });
 
-  test("keeps configured provider endpoints on bounded HTTP SSE", () => {
+  test("keeps canonical image-bearing input on HTTP SSE", () => {
+    const imageInput = [{
+      role: "user",
+      content: [
+        { type: "input_text", text: "describe this" },
+        { type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgo=" },
+      ],
+    }];
+    expect(shouldUseCodexWsUpstream(CODEX_URL, streamingInit({ input: imageInput }))).toBe(false);
+    expect(shouldUseCodexWsUpstream(CODEX_URL, streamingInit({
+      input: [{ type: "custom_tool_call_output", output: imageInput }],
+    }))).toBe(false);
+    expect(shouldUseCodexWsUpstream(CODEX_URL, streamingInit({
+      input: [{ type: "computer_screenshot", image_url: "data:image/png;base64,iVBORw0KGgo=" }],
+    }))).toBe(false);
+
+    // A prompt that merely discusses the wire type is still ordinary text.
+    expect(shouldUseCodexWsUpstream(CODEX_URL, streamingInit({
+      input: "Explain JSON containing {\"type\":\"input_image\"}",
+    }))).toBe(true);
+    // Operator-configured gateways keep their explicit WS policy; the image
+    // exception is destination-scoped to the canonical ChatGPT WS beta.
+    expect(shouldUseCodexWsUpstream(
+      "https://sub2api.example.com/v1/responses",
+      streamingInit({ input: imageInput }),
+      BOUNDED_WS_RUNTIME,
+      true,
+    )).toBe(false);
+  });
+
+  test("opt-in upstream WebSocket only for configured OpenAI-compatible Responses endpoints", () => {
     // The canonical backend ignores the flag.
     expect(shouldUseCodexWsUpstream(CODEX_URL, streamingInit(), false)).toBe(true);
     // Bun cannot reject oversized messages before assembling them, so even an
@@ -331,11 +361,11 @@ describe("handleResponses Codex WS relay selection", () => {
     } as OcxConfig;
   }
 
-  function request(): Request {
+  function request(input: unknown = "hello"): Request {
     return new Request("http://localhost/v1/responses", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer test" },
-      body: JSON.stringify({ model: "gpt-5.5", input: "hello", stream: true }),
+      body: JSON.stringify({ model: "gpt-5.5", input, stream: true }),
     });
   }
 
@@ -579,6 +609,39 @@ describe("handleResponses Codex WS relay selection", () => {
 
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(isEagerRelaySseResponse(response)).toBe(EAGER_RELAY_FORCED_BY_PLATFORM);
+    expect(await response.text()).toContain("response.completed");
+  });
+
+  test("an image-bearing continuation uses HTTP SSE without dialing upstream WS", async () => {
+    installFake(() => { throw new Error("canonical image input must not dial WS"); });
+    takeSpendHome();
+    const outboundBodies: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      outboundBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(
+        `event: response.completed\ndata: ${JSON.stringify({
+          type: "response.completed",
+          response: { id: "r-image", status: "completed", output: [] },
+        })}\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    }) as typeof fetch;
+
+    const input = [{
+      role: "user",
+      content: [
+        { type: "input_text", text: "describe this" },
+        { type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgo=" },
+      ],
+    }];
+    const response = await handleResponses(request(input), forwardConfig(), { model: "", provider: "" }, {
+      codexWsRuntimeIdentity: BOUNDED_WS_RUNTIME,
+    });
+
+    expect(response.status).toBe(200);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(outboundBodies).toHaveLength(1);
+    expect(JSON.stringify(outboundBodies[0]?.input)).toContain("input_image");
     expect(await response.text()).toContain("response.completed");
   });
 

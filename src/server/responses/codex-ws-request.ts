@@ -15,10 +15,36 @@ export interface PreparedCodexWsRequest {
   /** Original HTTP body/framing/options with only the canonical routing hint re-derived. */
   httpInit: RequestInit;
   canonical: boolean;
+  carriesImageInput: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const MAX_IMAGE_INPUT_SCAN_NODES = 100_000;
+
+/**
+ * Detect actual Responses image parts without matching prompt text. The scan is
+ * bounded and fail-safe: an unexpectedly large input stays on HTTP/SSE rather
+ * than entering the single-frame WebSocket path.
+ */
+export function codexRequestInputCarriesImage(input: unknown): boolean {
+  const pending: unknown[] = [input];
+  let scanned = 0;
+  while (pending.length > 0) {
+    const value = pending.pop();
+    scanned += 1;
+    if (scanned > MAX_IMAGE_INPUT_SCAN_NODES) return true;
+    if (Array.isArray(value)) {
+      for (const child of value) pending.push(child);
+      continue;
+    }
+    if (!isRecord(value)) continue;
+    if (value.type === "input_image" || value.type === "computer_screenshot") return true;
+    for (const child of Object.values(value)) pending.push(child);
+  }
+  return false;
 }
 
 function applyLiteMetadata(body: Record<string, unknown>, headers: Headers): boolean {
@@ -60,6 +86,7 @@ export function prepareCodexWsRequest(url: string, init: RequestInit): PreparedC
     if (!isRecord(parsed)) return null;
     const body = { ...parsed };
     const canonical = url === CODEX_RESPONSES_HTTP_URL;
+    const carriesImageInput = codexRequestInputCarriesImage(body.input);
     const httpHeaders = new Headers(init.headers);
     if (canonical) {
       if (!applyLiteMetadata(body, httpHeaders)) return null;
@@ -80,7 +107,7 @@ export function prepareCodexWsRequest(url: string, init: RequestInit): PreparedC
         ? headers["openai-beta"]
         : `${headers["openai-beta"]}, ${WS_BETA}`
       : WS_BETA;
-    return { frameText, headers, httpInit, canonical };
+    return { frameText, headers, httpInit, canonical, carriesImageInput };
   } catch {
     return null;
   }

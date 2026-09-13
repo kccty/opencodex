@@ -157,6 +157,11 @@ opencodex 也会通过 WebSocket 提供 `/v1/responses`。专用 provider 只有
 `supports_websockets = true`；在 loopback 情况下，Codex 的内置 provider 可能会先尝试 WebSocket，而关闭的 proxy
 会返回 `426`，从而让 Codex fallback 到 HTTP/SSE。
 
+这个客户端入口开关与 opencodex 到 ChatGPT 的上游传输相互独立。普通文本流在运行时满足条件时可以走上游
+`responses_websockets`；但只要发往 ChatGPT 的规范请求在 `input` 中包含 `input_image` 或
+`computer_screenshot`，opencodex 就会在建立 WebSocket 前保留 HTTP/SSE，以免把视觉输入通过单帧 beta
+通道重放。显式启用上游 WebSocket 的自定义 provider 仍遵循自己的配置。
+
 ## 线程标识与历史记录
 
 默认的 loopback 形式会让新线程继续标记为 Codex 原生的 `openai` provider，因此正常的 resume history 不需要

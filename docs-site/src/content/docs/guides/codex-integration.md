@@ -91,12 +91,15 @@ endpoint, covering both Pool and Direct modes — use the public ChatGPT endpoin
 or account selection does not bypass the upstream ChatGPT channel. The upstream may spend time
 queueing a request before the first output even when the local proxy and network path are healthy.
 
-Only some turns take the ChatGPT websocket transport — the same `responses_websockets` lane Codex
-CLI defaults to. A turn is eligible when the Bun runtime supports the bounded relay, the request
-is a `POST` to the canonical Responses URL or a configured WebSocket route, and its JSON body sets
-`stream` to `true` at the root. Everything else stays on SSE over HTTP, and an eligible turn still
-falls back to it when the request cannot be prepared, the `response.create` frame exceeds its size
-limit, or the proxy route cannot carry the socket.
+Only some turns take the ChatGPT `responses_websockets` transport. A turn is eligible when the Bun
+runtime supports the bounded relay, the request is a `POST` to the canonical Responses URL or a
+configured WebSocket route, and its JSON body sets `stream` to `true` at the root. Canonical ChatGPT
+requests whose `input` contains an `input_image` or `computer_screenshot` stay on HTTP/SSE before
+any socket is opened; this avoids replaying vision input through the single-frame WebSocket beta
+path. Everything else stays on SSE over HTTP, and an eligible turn still falls back to it when the
+request cannot be prepared, the `response.create` frame exceeds its size limit, or the proxy route
+cannot carry the socket. An explicitly WebSocket-enabled custom provider keeps its configured
+transport policy for image input.
 
 Local provider pacing can also hold a request before it is dispatched at all. So a slow first
 output has several possible contributors, and upstream queueing is only one of them. `ocx doctor`
