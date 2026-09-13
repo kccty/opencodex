@@ -394,15 +394,10 @@ the downstream relay emits its terminal `response.failed` event plus `[DONE]`.
 Pre-open HTTP fallback remains unmarked and follows the ordinary configured
 stream path.
 
-Canonical creates whose `input` structurally contains `input_image` or
-`computer_screenshot` stay on HTTP/SSE before any upstream socket is opened.
-The bounded scan follows nested Responses input and fails safe to HTTP when its
-node budget is exhausted; prompt strings that merely name those types do not
-change transport. This exception belongs only to the canonical ChatGPT WS beta.
-An operator-opted noncanonical Responses gateway retains its configured WS
-behavior for image input.
+Canonical creates whose `input` structurally contains `input_image` or `computer_screenshot` stay on HTTP/SSE before an upstream socket opens. The bounded nested scan fails safe to HTTP when its node budget is exhausted and ignores prompt strings that merely name those types.
+This exception belongs only to the canonical ChatGPT WS beta; an operator-opted noncanonical Responses gateway retains its configured WS behavior for image input.
 
-> Decision record: [ADR-0097](../decisions/ADR-0097-responses-http-sse.md)
+> Decision record: [ADR-0100](../decisions/ADR-0100-responses-http-sse.md)
 
 At the canonical ChatGPT destination, HTTP Responses Lite intent is copied into
 the native per-frame WS metadata key, and the routing hint is derived from the

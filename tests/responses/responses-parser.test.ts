@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { buildResponseJSON } from "../../src/bridge";
 import { parseRequest } from "../../src/responses/parser";
+import { COMPACTED_HISTORY_IMAGE_OMITTED } from "../../src/responses/compaction";
 import { externalTaskInputContent } from "../../src/responses/task-input";
 import { buildTools } from "../../src/responses/parser-tools";
 import { parseTextFormat } from "../../src/responses/parser-text-format";
@@ -825,6 +826,61 @@ describe("codex-rs compat surface (260707)", () => {
     expect(parsed.context.messages).toHaveLength(1);
     expect(parsed.context.messages[0].content).toBe("hello");
     expect(parsed._contextCompactionBoundary).toBe(true);
+  });
+
+  test("completed compaction omits only images before the newest boundary", () => {
+    const oldMessageImage = "data:image/png;base64,T0xELU1FU1NBR0U=";
+    const oldToolImage = "data:image/png;base64,T0xELVRPT0w=";
+    const newerOldImage = "data:image/png;base64,TkVXRVItT0xE";
+    const currentImage = "data:image/png;base64,Q1VSUkVOVA==";
+    const encryptedContent = "opaque-compaction-payload";
+    const body = Object.freeze({ ...base, input: Object.freeze([
+      Object.freeze({ type: "message", role: "user", content: Object.freeze([
+        Object.freeze({ type: "input_text", text: "look at this" }),
+        Object.freeze({ type: "input_image", image_url: oldMessageImage, detail: "high" }),
+      ]) }),
+      Object.freeze({ type: "function_call_output", call_id: "view-1", output: Object.freeze([
+        Object.freeze({ type: "input_image", image_url: oldToolImage }),
+      ]) }),
+      Object.freeze({ type: "context_compaction", encrypted_content: "older-boundary" }),
+      Object.freeze({ type: "message", role: "user", content: Object.freeze([
+        Object.freeze({ type: "input_image", image_url: newerOldImage }),
+      ]) }),
+      Object.freeze({ type: "compaction_summary", encrypted_content: encryptedContent }),
+      Object.freeze({ type: "message", role: "user", content: Object.freeze([
+        Object.freeze({ type: "input_text", text: "new turn" }),
+        Object.freeze({ type: "input_image", image_url: currentImage, detail: "original" }),
+      ]) }),
+    ]) });
+
+    const parsed = parseRequest(body);
+    const raw = parsed._rawBody as { input: Array<Record<string, unknown>> };
+    const serialized = JSON.stringify(raw);
+
+    expect(parsed._rawBody).not.toBe(body);
+    expect(serialized).not.toContain(oldMessageImage);
+    expect(serialized).not.toContain(oldToolImage);
+    expect(serialized).not.toContain(newerOldImage);
+    expect(serialized).toContain(currentImage);
+    expect(serialized.split(COMPACTED_HISTORY_IMAGE_OMITTED).length - 1).toBe(3);
+    expect(raw.input[4]?.encrypted_content).toBe(encryptedContent);
+    expect(JSON.stringify(body)).toContain(oldMessageImage);
+    expect(JSON.stringify(body)).toContain(oldToolImage);
+  });
+
+  test("a compaction trigger alone does not omit images", () => {
+    const image = "data:image/png;base64,U1RJTEwtTkVFREVE";
+    const body = Object.freeze({ ...base, input: Object.freeze([
+      Object.freeze({ type: "message", role: "user", content: Object.freeze([
+        Object.freeze({ type: "input_image", image_url: image }),
+      ]) }),
+      Object.freeze({ type: "compaction_trigger" }),
+    ]) });
+
+    const parsed = parseRequest(body);
+    expect(parsed._rawBody).toBe(body);
+    expect(JSON.stringify(parsed._rawBody)).toContain(image);
+    expect(parsed._compactionRequest).toBe(true);
   });
 
   test("local_shell_call pairs with its function_call_output", () => {

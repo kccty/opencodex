@@ -120,3 +120,7 @@ request on a request path. The marker carries a count and no URL, because a remo
 image URL can carry a signed token.
 
 Translated audio/file admission follows the [final-adapter input contract](../adapters/registry.md#untranslated-input-media); native raw passthrough remains separate.
+
+The shared `src/responses/` compaction ingress removes historical `input_image` payloads before the
+Kiro request builder runs once a completed compaction marker exists. It retains images after the
+newest marker, so current-turn multimodal input keeps the ordinary Kiro image behavior.

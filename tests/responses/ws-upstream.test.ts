@@ -13,6 +13,7 @@ import { shouldRetryCodexPoolAccountModel400 } from "../../src/server/responses/
 import { CodexWsSession } from "../../src/server/responses/codex-ws-session";
 import { prepareCodexWsRequest } from "../../src/server/responses/codex-ws-request";
 import { readCodexWsStage } from "../../src/server/responses/codex-ws-wire";
+import { parseRequest } from "../../src/responses/parser";
 import { CodexWsMetadata, CODEX_WS_METADATA_MAX_BYTES, CODEX_WS_METADATA_MAX_VALUE_BYTES } from "../../src/server/responses/codex-ws-metadata";
 import {
   bunSupportsBoundedCodexWsRelay,
@@ -160,6 +161,26 @@ describe("shouldUseCodexWsUpstream", () => {
       BOUNDED_WS_RUNTIME,
       true,
     )).toBe(false);
+  });
+
+  test("a completed compaction restores WS eligibility after historical images are omitted", () => {
+    const parsed = parseRequest({
+      model: "gpt-5.5",
+      stream: true,
+      input: [
+        { type: "message", role: "user", content: [
+          { type: "input_image", image_url: "data:image/png;base64,SElTVE9SSUNBTA==" },
+        ] },
+        { type: "context_compaction", encrypted_content: "opaque" },
+        { type: "message", role: "user", content: "continue without a new image" },
+      ],
+    });
+
+    expect(shouldUseCodexWsUpstream(CODEX_URL, {
+      method: "POST",
+      body: JSON.stringify(parsed._rawBody),
+    })).toBe(true);
+    expect(JSON.stringify(parsed._rawBody)).not.toContain("SElTVE9SSUNBTA==");
   });
 
   test("opt-in upstream WebSocket only for configured OpenAI-compatible Responses endpoints", () => {

@@ -231,6 +231,36 @@ describe("Responses request and compaction byte accounting", () => {
   );
 });
 
+describe("post-compaction image replay", () => {
+  test("canonical passthrough serializes the sanitized raw body", () => {
+    const historicalImage = "data:image/png;base64,SElTVE9SSUNBTA==";
+    const currentImage = "data:image/png;base64,Q1VSUkVOVA==";
+    const parsed = parseRequest({
+      model: "gpt-5.6-sol",
+      stream: true,
+      input: [
+        { type: "message", role: "user", content: [
+          { type: "input_image", image_url: historicalImage },
+        ] },
+        { type: "context_compaction", encrypted_content: "opaque" },
+        { type: "message", role: "user", content: [
+          { type: "input_text", text: "new turn" },
+          { type: "input_image", image_url: currentImage },
+        ] },
+      ],
+    });
+
+    const wire = createResponsesPassthroughAdapter(provider).buildRequest(parsed, {
+      headers: new Headers({ authorization: "Bearer caller-secret" }),
+    });
+
+    expect(wire.body).not.toContain(historicalImage);
+    expect(wire.body).toContain("[historical image omitted after context compaction]");
+    expect(wire.body).toContain(currentImage);
+    expect(wire.body).toContain('"encrypted_content":"opaque"');
+  });
+});
+
 describe("native routed code-mode result visibility", () => {
   const routed = { adapter: "openai-responses", baseUrl: "https://api.x.ai/v1", authMode: "key" as const };
   const exec = { type: "custom", name: "exec", description: "Run JavaScript in a V8 isolate." };

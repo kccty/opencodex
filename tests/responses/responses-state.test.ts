@@ -365,6 +365,38 @@ describe("Responses previous_response_id state", () => {
     ]);
   });
 
+  test("stores post-compaction history without the historical image payload", () => {
+    const historicalImage = "data:image/png;base64,SElTVE9SSUNBTA==";
+    const request = parseRequest({
+      model: "cursor/auto",
+      store: false,
+      input: [
+        { type: "message", role: "user", content: [
+          { type: "input_text", text: "old visual question" },
+          { type: "input_image", image_url: historicalImage },
+        ] },
+        { type: "context_compaction", encrypted_content: "opaque" },
+        { type: "message", role: "user", content: "continue" },
+      ],
+    });
+    const first = fixedResponse("resp_compacted_without_image", [
+      { type: "message", role: "assistant", id: "msg_after_compaction", content: "answer" },
+    ]);
+    rememberResponseState(request._rawBody, first, undefined, { force: true });
+
+    const expanded = expandPreviousResponseInput({
+      model: "cursor/auto",
+      previous_response_id: first.id,
+      input: [{ type: "message", role: "user", content: "next" }],
+      store: false,
+    }) as { input: unknown[] };
+    const replayed = parseRequest(expanded);
+
+    expect(JSON.stringify(expanded)).not.toContain(historicalImage);
+    expect(JSON.stringify(expanded)).toContain("[historical image omitted after context compaction]");
+    expect(replayed._replayPrefixLen).toBe(4);
+  });
+
   test("replays continuation only inside the originating client task", () => {
     const firstBody = { model: "cursor/auto", input: "private task A history", store: true };
     const first = fixedResponse("resp_task_scoped", [

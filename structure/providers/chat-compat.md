@@ -154,6 +154,12 @@ equivalent normalization and restoration.
 These compatibility guards are covered by focused tests and should stay close to the adapters that
 need them.
 
+Before either native Responses passthrough or a translated Chat adapter consumes the raw request,
+the shared `src/responses/` parser replaces `input_image` blocks older than the newest completed
+compaction marker with a fixed text marker. Images after that marker remain structured image parts;
+`compaction_trigger` alone changes nothing. The same sanitized body is used for proxy continuation
+state, preventing an old Base64 image from being restored by `previous_response_id` later.
+
 Responses passthrough always removes output-only `status` from `reasoning` input items, including
 items that retain opaque `encrypted_content`. The prior retains-blob-keeps-status invariant was
 defensive rather than observed: measured OpenAI reasoning items never contain `status`, and Grok

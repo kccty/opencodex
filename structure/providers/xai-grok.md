@@ -101,6 +101,10 @@ The same marked client-facing chain normalizes lexical floating-point `response.
 nested values are nonnegative safe integers. Missing, malformed, fractional, negative, unsafe, and
 byte-identical payloads pass through unchanged.
 
+The shared `src/responses/` compaction ingress replaces historical `input_image` payloads before
+Grok routing once a completed compaction marker exists. Current images after the newest marker and
+the Grok-specific reasoning and terminal-repair contracts remain unchanged.
+
 > Decision record: [ADR-0059](../decisions/ADR-0059-xai-grok-hardening-official-grok-build-contract.md)
 
 ### Grok Reset Coupons (Billing API Parity)
