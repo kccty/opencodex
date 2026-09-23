@@ -5,6 +5,7 @@ import type { AdapterRequest, IncomingMeta, ProviderAdapter } from "./base";
 import type { AdapterEvent, OcxParsedRequest, OcxProviderConfig, OcxUsage } from "../types";
 import { modelInList } from "../types";
 import { createInlineThinkContentSplitter, splitInlineThinkContent } from "./inline-think-tags";
+import { MimoToolTextGuard, buildMimoDeclaredTools, isMimoToolTextModel } from "./openai-chat/mimo-tool-text";
 import { mapReasoningEffort, modelRecordValue } from "../reasoning-effort";
 import { debugProviderDiagnostic } from "../lib/debug";
 import { sseFieldValue } from "../lib/sse-decoder";
@@ -92,6 +93,8 @@ function canSerializeOpenAIChatServiceTier(
 
 export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAdapter {
   let lastRequestedModelId: string | undefined;
+  let lastDeclaredTools = buildMimoDeclaredTools(undefined);
+  let lastModelIsMimo = false;
   return withOpenAIChatToolNames(toolNames => ({
     name: "openai-chat",
 
@@ -99,6 +102,8 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
 
     buildRequest(parsed: OcxParsedRequest, incoming?: IncomingMeta) {
       lastRequestedModelId = parsed.modelId;
+      lastModelIsMimo = isMimoToolTextModel(parsed.modelId);
+      lastDeclaredTools = buildMimoDeclaredTools(parsed.context.tools);
       const { url, headers, hasCredential } = openAIChatTransport(provider);
       const messages = toolNames.messages(parsed, provider.baseUrl, messagesToChatFormat(parsed, provider));
       const finish = (): AdapterRequest => {
@@ -332,6 +337,8 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
             return "terminate";
           }
           if (!call.id) call.id = `call_${++toolCallSeq}`;
+          // A matching call proves the held markup is a duplicate echo (#5499); drop it but still emit this call.
+          mimoGuard?.matchToolCall(call.name, call.args);
           yield { type: "tool_call_start", id: call.id, name: toolNames.restore(call.name) };
           if (call.args.length > 0) yield { type: "tool_call_delta", arguments: call.args };
           yield { type: "tool_call_end" };
@@ -359,6 +366,21 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
       // A gateway with no server-side reasoning parser leaves thinking inline in `content` as
       // <think> blocks, which would otherwise render as the answer. Passthrough unless opted in.
       const inlineThink = createInlineThinkContentSplitter(provider.inlineThinkTagModels, lastRequestedModelId, budget);
+      // MiMo v2.6 leaks native XML tool-call markup into `content` alongside the structured
+      // tool_calls entry (#5499). Hold the markup so a matching call can drop it, or restore/release at finish.
+      const mimoGuard = lastModelIsMimo ? new MimoToolTextGuard(lastDeclaredTools) : undefined;
+      const throughGuard = function* (events: AdapterEvent[]): Generator<AdapterEvent> {
+        if (!mimoGuard) { yield* emitContent(events); return; }
+        for (const event of events) {
+          if (event.type !== "text_delta") { yield event; continue; }
+          yield* emitContent(mimoGuard.feed(event.text));
+        }
+      };
+      const feedContent = (text: string): Generator<AdapterEvent> => throughGuard(inlineThink.feed(text));
+      const flushInlineThink = (): Generator<AdapterEvent> => throughGuard(inlineThink.flush());
+      const flushMimoGuard = function* (): Generator<AdapterEvent> {
+        if (mimoGuard) yield* emitContent(mimoGuard.flush().events);
+      };
       const emitContent = function* (events: AdapterEvent[]): Generator<AdapterEvent> {
         for (const event of events) { if (event.type === "text_delta") sawUserFacingOutput = true; yield event; }
       };
@@ -369,8 +391,9 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         const payload = rawPayload.trim();
         if (payload.length === 0) return "continue";
         if (payload === "[DONE]") {
-          yield* emitContent(inlineThink.flush());
+          yield* flushInlineThink();
           if ((yield* flushToolCalls()) === "terminate") return "terminate";
+          yield* flushMimoGuard();
           const stopReason = stopReasonFor(finishReason);
           yield { type: "done", usage: pendingUsage, ...(stopReason ? { stopReason } : {}) };
           return "terminate";
@@ -430,7 +453,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
             if (reasoningText !== undefined) yield { type: "reasoning_raw_delta", text: reasoningText };
           }
           if (typeof delta.content === "string" && delta.content.length > 0) {
-            yield* emitContent(inlineThink.feed(delta.content));
+            yield* feedContent(delta.content);
           }
 
           const rawToolCalls = delta.tool_calls;
@@ -569,8 +592,9 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         }
 
         if (typeof choice.finish_reason === "string" && choice.finish_reason) {
-          yield* emitContent(inlineThink.flush());
+          yield* flushInlineThink();
           if ((yield* flushToolCalls()) === "terminate") return "terminate";
+          yield* flushMimoGuard();
         }
         return "continue";
       };
@@ -613,7 +637,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
         if (buffer.length > 0) {
           if ((yield* handleDataLine(buffer)) === "terminate") return;
         }
-        yield* emitContent(inlineThink.flush());
+        yield* flushInlineThink();
         const sawFinish = finishReason !== undefined;
         if (!sawFinish && pendingToolCalls.length > 0) {
           // Some OpenAI-compatible gateways close immediately after a complete function-call
@@ -622,6 +646,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
           // complete JSON object. A partial JSON prefix still takes the truncation path below.
           if (provider.openaiChatEofTolerance === true && pendingToolCallsAreCompleteJsonObjects()) {
             if ((yield* flushToolCalls()) === "terminate") return;
+            yield* flushMimoGuard();
             yield { type: "done", usage: pendingUsage };
             return;
           }
@@ -642,6 +667,7 @@ export function createOpenAIChatAdapter(provider: OcxProviderConfig): ProviderAd
           return;
         }
         if ((yield* flushToolCalls()) === "terminate") return;
+        yield* flushMimoGuard();
         const stopReason = stopReasonFor(finishReason);
         yield { type: "done", usage: pendingUsage, ...(stopReason ? { stopReason } : {}) };
       } catch (error) {
