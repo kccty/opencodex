@@ -331,23 +331,11 @@ again held its entry for the life of the process.
 
 > Decision record: [ADR-0038](../decisions/ADR-0038-responses-http-sse.md)
 
-A replayed compaction item carries an `encrypted_content` blob only its minting backend can decode,
-and the client replays it on every later turn. The proxy's own `ocx1:` envelopes are transparent
-base64, so they always lower to plain user messages. A native blob is relayed only when there is no
-known serving-identity mismatch and the destination is known to decode native blobs — the canonical
-ChatGPT forward surface, the official OpenAI API, or a provider with the explicit
-`decodesNativeCompactionBlobs` capability. The destination gate alone is insufficient because more
-than one backend, including OpenAI and xAI, mints native blobs: a destination can decode its own blob
-without being able to decode the previous backend's. The same serving-identity mismatch signal
-therefore strips reasoning `encrypted_content` and degrades native compaction blobs through the
-existing opaque-note path. When the thread has no recorded identity, the destination-only behavior
-is deliberately unchanged. Forward auth alone is not evidence: noncanonical forward providers
-receive no caller credentials and may point at any backend. On any other routed destination the blob
-also degrades to the same opaque note the bridged parser uses, because forwarding it there fails the
-turn and the item outlives the failure in the client transcript, repeating on every later turn
-including the compaction turn the proxy itself drives. With `store: false`, request sanitization
-strips ids from every input item, including compact-wire items, matching codex-rs
-(`core/src/client.rs:918-925`). Compact-wire items remain exempt from response-side field backfill.
+A replayed compaction item carries an `encrypted_content` blob only its minting backend can decode, and the client replays it on every later turn. The proxy's own `ocx1:` envelopes are transparent base64, so they always lower to plain user messages.
+A native blob is relayed only when there is no known serving-identity mismatch and the destination is known to decode native blobs — the canonical ChatGPT forward surface, the official OpenAI API, or a provider with the explicit `decodesNativeCompactionBlobs` capability. The destination gate alone is insufficient because more than one backend, including OpenAI and xAI, mints native blobs: a destination can decode its own blob without being able to decode the previous backend's.
+The same serving-identity mismatch signal therefore strips reasoning `encrypted_content` and degrades native compaction blobs through the existing opaque-note path. When the thread has no recorded identity, the destination-only behavior is deliberately unchanged. Forward auth alone is not evidence: noncanonical forward providers receive no caller credentials and may point at any backend.
+On any other routed destination the blob also degrades to the same opaque note the bridged parser uses, because forwarding it there fails the turn and the item outlives the failure in the client transcript, repeating on every later turn including the compaction turn the proxy itself drives.
+With `store: false`, request sanitization strips ids from every input item, including compact-wire items, matching codex-rs (`core/src/client.rs:918-925`). Compact-wire items remain exempt from response-side field backfill.
 
 For replayed `encrypted_content` slots whose minting provenance is unavailable after a restart or
 full-history resend, the plaintext-compatibility boundary requires canonical key-independent Fernet
@@ -405,6 +393,11 @@ always become unable to serve.
 
 > Decision record: [ADR-0039](../decisions/ADR-0039-responses-http-sse.md)
 
+
+Completed compaction is also the lifetime boundary for historical image payloads. Before `src/responses/parser.ts` lowers a request, `src/responses/compaction.ts` finds the newest `compaction`, `compaction_summary`, or `context_compaction` item and replaces earlier `input_image` blocks in message content and tool-output arrays with `[historical image omitted after context compaction]`.
+The copy-on-write rewrite preserves the caller's object, compaction `encrypted_content`, ids, order, and all items at or after the boundary; `compaction_trigger` is not a boundary because it does not prove completion. The sanitized raw body feeds native Responses and the `previous_response_id` cache, while images after the newest completed boundary remain available to the current multimodal route.
+
+> Decision record: [ADR-0124](../decisions/ADR-0124-responses-http-sse.md)
 
 ## Core module ownership
 

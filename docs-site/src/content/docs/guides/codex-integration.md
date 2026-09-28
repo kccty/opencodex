@@ -431,6 +431,15 @@ When a routed provider cannot return a native compaction blob, OpenCodeX stores 
 own `ocx1:` envelope. Native ChatGPT cannot verify that envelope if OpenCodeX is later removed from
 the request path.
 
+Regardless of which side performs compaction, a later Responses request containing a completed
+`compaction`, `compaction_summary`, or `context_compaction` item makes OpenCodeX replace older
+`input_image` blocks with `[historical image omitted after context compaction]` before provider
+dispatch. Images attached after the newest completed marker remain available. A
+`compaction_trigger` alone does not remove anything. The sanitized body is also what OpenCodeX keeps
+for `previous_response_id` replay, so historical Base64 bytes do not return through its continuation
+cache. Codex can still retain the original bytes in its own local task data; this behavior prevents
+them from leaving the proxy again rather than rewriting Codex's files.
+
 On an authenticated loopback route, enable client-side compaction to keep V2 sub-agent routing while preventing new `ocx1:` compaction summaries. Non-loopback and API-key routes retain their existing provider and authentication behavior:
 
 ```bash

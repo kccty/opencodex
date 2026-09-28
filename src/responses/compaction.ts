@@ -38,6 +38,13 @@ export const SUMMARY_PREFIX = "Another language model started to solve this prob
 export const OPAQUE_COMPACTION_NOTE = "[earlier conversation was compacted; the summary is stored in a format this model cannot read]";
 
 /**
+ * Stable replacement for image bytes that predate the newest completed compaction boundary.
+ * The compaction item already carries the semantic handoff; retaining the original image payload
+ * after that boundary only makes every later request resend the same bytes.
+ */
+export const COMPACTED_HISTORY_IMAGE_OMITTED = "[historical image omitted after context compaction]";
+
+/**
  * Item types in the compact wire family. Each carries an `encrypted_content` blob the client
  * replays verbatim on every later turn, and the minting backend verifies it is unmodified.
  *
@@ -53,6 +60,69 @@ const COMPACTION_ITEM_TYPES: ReadonlySet<string> = new Set([
 
 export function isCompactionItemType(type: unknown): boolean {
   return typeof type === "string" && COMPACTION_ITEM_TYPES.has(type);
+}
+
+type HistoricalImageOmission = {
+  body: unknown;
+  omittedImages: number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function omitImageBlocks(blocks: unknown): { blocks: unknown; omittedImages: number } {
+  if (!Array.isArray(blocks)) return { blocks, omittedImages: 0 };
+  let omittedImages = 0;
+  const rewritten = blocks.map(block => {
+    if (!isRecord(block) || block.type !== "input_image") return block;
+    omittedImages += 1;
+    return { type: "input_text", text: COMPACTED_HISTORY_IMAGE_OMITTED };
+  });
+  return omittedImages > 0 ? { blocks: rewritten, omittedImages } : { blocks, omittedImages: 0 };
+}
+
+/**
+ * Copy-on-write removal of replayed image payloads before the newest completed compaction item.
+ *
+ * Only protocol fields whose schemas accept `input_text` are rewritten: message `content` and
+ * function/custom-tool `output` arrays. Opaque compaction bytes, ids, item order, and every item
+ * at or after the boundary remain byte-for-byte equivalent at the value level. A
+ * `compaction_trigger` is intentionally not a boundary because it does not prove compaction
+ * completed successfully.
+ */
+export function omitHistoricalImagesBeforeLastCompaction(body: unknown): HistoricalImageOmission {
+  if (!isRecord(body) || !Array.isArray(body.input)) return { body, omittedImages: 0 };
+
+  let boundary = -1;
+  for (let index = 0; index < body.input.length; index++) {
+    const item = body.input[index];
+    if (isRecord(item) && isCompactionItemType(item.type)) boundary = index;
+  }
+  if (boundary < 0) return { body, omittedImages: 0 };
+
+  let omittedImages = 0;
+  let rewrittenInput: unknown[] | undefined;
+  for (let index = 0; index < boundary; index++) {
+    const item = body.input[index];
+    if (!isRecord(item)) continue;
+
+    const isMessage = (item.type === undefined || item.type === "message")
+      && (item.role === "user" || item.role === "developer" || item.role === "system");
+    const isToolOutput = item.type === "function_call_output" || item.type === "custom_tool_call_output";
+    if (!isMessage && !isToolOutput) continue;
+
+    const field = isMessage ? "content" : "output";
+    const result = omitImageBlocks(item[field]);
+    if (result.omittedImages === 0) continue;
+
+    if (!rewrittenInput) rewrittenInput = [...body.input];
+    rewrittenInput[index] = { ...item, [field]: result.blocks };
+    omittedImages += result.omittedImages;
+  }
+
+  if (!rewrittenInput) return { body, omittedImages: 0 };
+  return { body: { ...body, input: rewrittenInput }, omittedImages };
 }
 
 export function encodeCompactionSummary(summary: string): string {
