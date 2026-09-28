@@ -1787,6 +1787,7 @@
   "ws-steering-completion.test.ts": "responses",
   "ws-steering-smoke.test.ts": "responses",
   "ws-steering-stability.test.ts": "responses",
+  "ws-upstream-image-input.test.ts": "responses",
   "ws-upstream-reuse.test.ts": "responses",
   "ws-upstream-socks5.test.ts": "responses",
   "ws-upstream.test.ts": "responses",

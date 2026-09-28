@@ -100,9 +100,12 @@ queueing a request before the first output even when the local proxy and network
 Only some turns take the ChatGPT websocket transport — the same `responses_websockets` lane Codex
 CLI defaults to. A turn is eligible when the Bun runtime supports the bounded relay, the request
 is a `POST` to the canonical Responses URL or a configured WebSocket route, and its JSON body sets
-`stream` to `true` at the root. Everything else stays on SSE over HTTP, and an eligible turn still
-falls back to it when the request cannot be prepared, the `response.create` frame exceeds its size
-limit, or the proxy route cannot carry the socket.
+`stream` to `true` at the root. Canonical ChatGPT requests whose `input` contains an `input_image`
+or `computer_screenshot` stay on HTTP/SSE before any socket is opened; this avoids replaying vision
+input through the single-frame WebSocket beta path. Everything else stays on SSE over HTTP, and an
+eligible turn still falls back to it when the request cannot be prepared, the `response.create`
+frame exceeds its size limit, or the proxy route cannot carry the socket. An explicitly
+WebSocket-enabled custom provider keeps its configured transport policy for image input.
 
 To keep the built-in ChatGPT provider on HTTP/SSE, set `providers.openai.upstreamWebsocket`
 to `false` in `~/.opencodex/config.json` and restart the proxy. Merge this field into the

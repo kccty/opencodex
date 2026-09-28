@@ -6,9 +6,11 @@ import type { NativeResponseControl } from "./native-response-control";
 // Why this exists: the Codex backend serves the responses_websockets path from
 // a measurably faster queue than the plain SSE POST path. Measured 2026-08-12
 // KST (same account, same payload, strictly sequential): gpt-5.6-luna TTFT p50
-// ~1.0s over WS vs ~3.9s over SSE. Codex CLI itself defaults to the WS
-// transport; opencodex previously always POSTed SSE, which is where its extra
-// 2-3s of TTFT came from.
+// ~1.0s over WS vs ~3.9s over SSE. Image-bearing canonical requests remain on
+// HTTP/SSE: replaying their complete input as one WS create has a materially
+// slower and less reliable response prelude than the native HTTP path. Codex
+// CLI itself defaults to the WS transport; opencodex previously always POSTed
+// SSE, which is where its extra 2-3s of TTFT came from.
 //
 // The wrapper only swaps the transport. It dials wss:// with the same headers,
 // sends the JSON body as a single `response.create` frame, and re-encodes the
@@ -18,7 +20,14 @@ import type { NativeResponseControl } from "./native-response-control";
 import { compareBunVersions } from "../../lib/bun-stream-caps";
 import { resolveProxyRoute, socks5ProxyFromEnv } from "../../lib/proxy-env";
 import type { CodexWsQuotaObserver } from "./codex-ws-metadata";
-import { CODEX_RESPONSES_HTTP_URL, CODEX_RESPONSES_WS_URL, CODEX_WS_FRAME_HEADERS, prepareCodexHttpInit, prepareCodexWsRequest } from "./codex-ws-request";
+import {
+  CODEX_RESPONSES_HTTP_URL,
+  CODEX_RESPONSES_WS_URL,
+  CODEX_WS_FRAME_HEADERS,
+  codexRequestInputCarriesImage,
+  prepareCodexHttpInit,
+  prepareCodexWsRequest,
+} from "./codex-ws-request";
 import { codexWsExchange } from "./codex-ws-exchange";
 import { CodexWsSession } from "./codex-ws-session";
 import { codexWsPool, codexWsReuseIdentity } from "./codex-ws-pool";
@@ -141,8 +150,12 @@ export function shouldUseCodexWsUpstream(
   // substring matching) also keeps whitespace-formatted bodies routable.
   try {
     const parsed = JSON.parse(body) as unknown;
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      && (parsed as Record<string, unknown>).stream === true;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return false;
+    const request = parsed as Record<string, unknown>;
+    if (request.stream !== true) return false;
+    // This exception is destination-scoped. Operator-configured gateways keep
+    // their explicit WS policy; only the canonical ChatGPT WS beta is avoided.
+    return url !== CODEX_RESPONSES_HTTP_URL || !codexRequestInputCarriesImage(request.input);
   } catch {
     return false;
   }
@@ -161,6 +174,8 @@ export function codexWsUpstreamFetch(
   const prepared = prepareCodexWsRequest(url, init);
   if (!prepared) return sseFallback(url, prepareCodexHttpInit(url, init));
   init = prepared.httpInit;
+  // Keep direct callers safe even if they bypass shouldUseCodexWsUpstream.
+  if (prepared.canonical && prepared.carriesImageInput) return sseFallback(url, init);
   if ((url !== CODEX_RESPONSES_HTTP_URL && url !== OPENAI_API_RESPONSES_URL)
     || !bunSupportsBoundedCodexWsRelay(runtime)) {
     return sseFallback(url, init);
