@@ -162,6 +162,18 @@ opencodex 也会通过 WebSocket 提供 `/v1/responses`。专用 provider 只有
 `computer_screenshot`，opencodex 就会在建立 WebSocket 前保留 HTTP/SSE，以免把视觉输入通过单帧 beta
 通道重放。显式启用上游 WebSocket 的自定义 provider 仍遵循自己的配置。
 
+### 压缩后的历史图片
+
+只要后续 Responses 请求中已经出现成功完成的 `compaction`、`compaction_summary` 或
+`context_compaction` 标记，opencodex 就会在转发给 provider 之前，把最近一次标记以前的
+`input_image` 替换成固定文本 `[historical image omitted after context compaction]`。最近一次成功压缩
+以后新附加的图片仍会正常发送；单独出现 `compaction_trigger` 不会删除任何图片，因为它只表示请求压缩，
+并不证明压缩成功。opencodex 的 `previous_response_id` continuation cache 也只保存清理后的请求，因此旧
+Base64 图片不会再从该缓存回流。
+
+这个行为不会改写 Codex 自己的会话文件；Codex 本地仍可能保留原始图片。它保证的是压缩完成后，这些旧图片
+不再经过 opencodex 发往后端。如果之后还需要模型查看原像素，需要在最近一次压缩标记之后重新附加图片。
+
 ## 线程标识与历史记录
 
 默认的 loopback 形式会让新线程继续标记为 Codex 原生的 `openai` provider，因此正常的 resume history 不需要
