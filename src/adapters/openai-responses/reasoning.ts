@@ -273,7 +273,9 @@ export function normalizeConfiguredReasoningSummaryDelivery(
 /**
  * Apply the routed provider's real effort ladder to an existing Responses reasoning field.
  * Native forward requests keep the server-owned native clamp; unknown third-party ladders stay
- * byte-equivalent instead of acquiring a policy from this adapter.
+ * byte-equivalent except for `ultra`, which never reaches any provider wire (codex-rs itself
+ * steps ultra down to max before any provider request), so an undeclared ladder still gets
+ * that one boundary.
  */
 export function mapRoutedResponsesReasoningEffort(
   body: unknown,
@@ -281,7 +283,12 @@ export function mapRoutedResponsesReasoningEffort(
   modelId: string,
 ): unknown {
   if (provider.authMode === "forward") return body;
-  if (configuredReasoningEfforts(provider, modelId) === undefined) return body;
+  if (configuredReasoningEfforts(provider, modelId) === undefined) {
+    if (isPlainObject(body) && isPlainObject(body.reasoning) && (body.reasoning as { effort?: unknown }).effort === "ultra") {
+      return { ...body, reasoning: { ...(body.reasoning as Record<string, unknown>), effort: "max" } };
+    }
+    return body;
+  }
   if (!isPlainObject(body) || !isPlainObject(body.reasoning)) return body;
   const declaredEfforts = modelRecordValue(provider.modelReasoningEfforts, modelId) ?? provider.reasoningEfforts;
   // An explicitly empty ladder means no effort control, not no reasoning output.

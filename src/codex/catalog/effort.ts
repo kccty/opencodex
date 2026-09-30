@@ -62,10 +62,13 @@ export function nativeEffortClamp(slug: string, effort: string | undefined): str
     // a retired slug a client still asks for, and future old-ladder slugs)
     // really stops at xhigh — the ChatGPT backend error names exactly none..xhigh — so clamp
     // the synthetic top tier.
-    return isGpt56NativeSlug(slug) ? null : "xhigh";
+    return isGpt56NativeSlug(slug) ? (effort === "ultra" ? "max" : null) : "xhigh";
   }
   const supported = levels.flatMap(l => typeof l.effort === "string" ? [l.effort] : []);
-  if (supported.includes(effort)) return null;
+  // The ChatGPT wire rejects `ultra` as reasoning.effort even when the pinned ladder lists it:
+  // the catalog's ultra is the delegation display tier and the API enum stops at max, so ultra
+  // always steps down to the ladder's real top rung instead of passing through.
+  if (effort !== "ultra" && supported.includes(effort)) return null;
   const rank = ["minimal", "low", "medium", "high", "xhigh", "max"];
   const highest = supported
     .filter(e => rank.includes(e))

@@ -225,6 +225,13 @@ describe("mock-max wire clamp (nativeEffortClamp)", () => {
     expect(nativeEffortClamp("gpt-5.6-luna", "max")).toBe(null);
   });
 
+  test("ultra steps down even when the pinned ladder lists it (the wire enum stops at max)", () => {
+    // gpt-6-sol's pinned ladder carries the delegation display tier; the ChatGPT API still
+    // rejects reasoning.effort=ultra, so ultra must land on the ladder's real top rung.
+    expect(nativeEffortClamp("gpt-6-sol", "ultra")).toBe("max");
+    expect(nativeEffortClamp("gpt-5.6-sol", "ultra")).toBe("max");
+  });
+
   test("only the canonical built-in OpenAI forward route enters the native clamp gate", () => {
     const nativeProvider = {
       adapter: "openai-responses",
