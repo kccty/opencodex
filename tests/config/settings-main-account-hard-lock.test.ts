@@ -48,7 +48,7 @@ afterEach(() => {
   removeTreeWithRetry(home);
 });
 
-describe("main-account 98 percent setting", () => {
+describe("main-account 95 percent setting", () => {
   test("GET reports the default-on lock without a stored key", async () => {
     const response = await request(config());
     expect(await response!.json()).toMatchObject({

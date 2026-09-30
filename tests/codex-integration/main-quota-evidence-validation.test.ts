@@ -189,7 +189,7 @@ describe("main policy window replacement", () => {
       }
       // Replacement proof is per-observation, never a persisted permission to drop future evidence.
       expect(policy).not.toHaveProperty("shortWindowAbsent");
-      expect(getMainAccountHardLockStatus(cfg).state).toBe(percent < 98 ? "ready" : "blocked");
+      expect(getMainAccountHardLockStatus(cfg).state).toBe(percent < 95 ? "ready" : "blocked");
       publish({ rate_limit: { primary_window: { used_percent: 99, limit_window_seconds: 18_000 } } });
       expect(getMainAccountHardLockStatus(cfg).state).toBe("blocked");
     });
@@ -348,7 +348,7 @@ describe("cold persisted policy percentage ranges", () => {
     test.each([0, 97.99, 98, 99, 100])(`${field}=%s survives disk hydration without clamping`, value => {
       const disk = writeColdPolicy({ [field]: value });
       expect(getMainPolicyQuota()).toEqual(disk);
-      expect(getMainAccountHardLockStatus(cfg).state).toBe(value < 98 ? "ready" : "blocked");
+      expect(getMainAccountHardLockStatus(cfg).state).toBe(value < 95 ? "ready" : "blocked");
     });
   }
 

@@ -16,7 +16,7 @@ Routing turns the model id sent by a client into one concrete provider and upstr
 ### Codex Pool low-quota protection
 
 `codexPool.lowQuotaProtection` applies only to stored Codex Pool accounts. The Desktop/main
-account keeps its separate 98% hard lock. The optional shape is:
+account keeps its separate 95% hard lock. The optional shape is:
 
 ```json
 {"codexPool":{"lowQuotaProtection":{"enabled":true,"threshold":80,"actions":{"pause":true,"notify":true},"windows":{"short":true,"weekly":true}}}}

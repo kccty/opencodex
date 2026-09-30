@@ -137,9 +137,9 @@ Remove the stored OAuth credential for a provider.
 
 ## Accounts and key pools
 
-### Main-account 98% protection
+### Main-account 95% protection
 
-In **Codex settings → Multi-auth → Advanced settings**, **Block main account at 98%**
+In **Codex settings → Multi-auth → Advanced settings**, **Block main account at 95%**
 is on by default beside Ultra Fast. Switching it off applies immediately; turning it back on first
 shows the consequences, and cancelling does not change the setting. The main-account card shows
 monitoring, unknown usage, or a current policy block even when Advanced settings is closed.
@@ -151,10 +151,10 @@ account usable ([#5694](https://github.com/lidge-jun/opencodex/issues/5694)). Th
 Reserve: while the block is in force, Reserve on that main account cannot activate. To let the main
 account run to exhaustion and hand over to Reserve, turn the switch off.
 
-The **5h window and the weekly window each block on their own**: either one reaching 98% blocks
+The **5h window and the weekly window each block on their own**: either one reaching 95% blocks
 immediately, even while the other still has headroom. Monthly-only accounts use their monthly
 window. The block releases automatically, with the switch still on, once every blocking window
-reports a fresh reading below 98% (a 0% reset counts); the next 98% observation blocks again.
+reports a fresh reading below 95% (a 0% reset counts); the next 95% observation blocks again.
 An unreadable 5h reading cannot hide a weekly block. Unknown usage does not fabricate a zero, and a missing reading does
 not erase an already measured blocking tuple. A predicted reset time alone does not unlock it.
 While blocked, the minute sweep waits for the latest known blocking reset, then checks owned usage.
@@ -167,7 +167,7 @@ Protection treats one fresh valid WHAM usage response as a replacement for the o
 its primary window explicitly lasts **at least 24 hours** and secondary/tertiary windows are explicitly `null`
 or also explicitly last at least 24 hours and report their usage. This follows the parser's short/long boundary, so a
 one-day window qualifies as well as weekly/monthly windows. The current window still uses the same
-98% threshold. This relies on the single reported snapshot; repeated observations are not required.
+95% threshold. This relies on the single reported snapshot; repeated observations are not required.
 Omitted secondary/tertiary fields, an unknown primary duration, or partial response headers cannot clear a previous block.
 The proxy checks the stored credential again before applying a delayed response. An unreadable file
 or replaced bearer cannot update the usage cache, release the lock, or quarantine the new credential,
@@ -188,7 +188,7 @@ keyring credentials, and traffic outside the proxy can still spend quota. Added 
 providers remain available.
 
 With protection on, an owned startup restores the main credential's in-memory identity
-binding after native-profile recovery and cleanup, so a persisted 98% block survives a restart.
+binding after native-profile recovery and cleanup, so a persisted 95% block survives a restart.
 Caller-owned Direct, exact-main, main-fallback, and main-pin requests can briefly receive 503
 while that binding is pending; healthy stored Pool accounts stay eligible throughout. No
 credential is read from a foreign or unconfirmed service home for this initialization.
@@ -222,7 +222,7 @@ Each compatibility request checks a credential-bound server authorization, cache
 requires ordinary usage to be disallowed, the Luna Reserve banner, and exactly one allowed Reserve
 bucket. Missing, denied, stale or mismatched evidence refuses the request; it does not switch accounts
 or silently use ordinary Luna. Passive usage can revoke authorization but cannot create it.
-Global cooldown, pause, reauthentication and the 98% hard lock still apply. Turn the hard lock off if
+Global cooldown, pause, reauthentication and the 95% hard lock still apply. Turn the hard lock off if
 you want to use Reserve on an exhausted main account; doing so does not grant server entitlement.
 This compatibility path supports conversation requests and compaction, not Reserve as a vision or
 web-search helper or a standalone search-relay model. Choose another model for those helpers.

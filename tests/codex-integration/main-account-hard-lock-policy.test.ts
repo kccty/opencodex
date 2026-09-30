@@ -51,13 +51,13 @@ describe("identity-bound main-account hard-lock policy", () => {
     expect(getMainAccountHardLockStatus(enabled, now).state).toBe("unknown");
   });
 
-  test.each([97.99, 98, 100])("raw %s percent is compared without GUI rounding", percent => {
+  test.each([94.99, 95, 100])("raw %s percent is compared without GUI rounding", percent => {
     observe({ weeklyPercent: percent });
-    expect(getMainAccountHardLockStatus(enabled, now).state).toBe(percent < 98 ? "ready" : "blocked");
+    expect(getMainAccountHardLockStatus(enabled, now).state).toBe(percent < 95 ? "ready" : "blocked");
   });
 
-  test("a short-only 98 reading blocks despite the rotation scorer's unknown sentinel", () => {
-    observe({ shortPercent: 98 });
+  test("a short-only 95 reading blocks despite the rotation scorer's unknown sentinel", () => {
+    observe({ shortPercent: 95 });
     expect(isMainAccountHardLocked(enabled, now)).toBe(true);
   });
 
@@ -114,22 +114,22 @@ describe("identity-bound main-account hard-lock policy", () => {
     expect(isMainAccountHardLocked(enabled, now + 24 * 60 * 60_000)).toBe(true);
   });
 
-  test.each(["shortPercent", "weeklyPercent"] as const)("%s resets to zero, unlocks, and rearms at 98 without disabling", field => {
-    observe({ [field]: 98 });
+  test.each(["shortPercent", "weeklyPercent"] as const)("%s resets to zero, unlocks, and rearms at 95 without disabling", field => {
+    observe({ [field]: 95 });
     expect(isMainAccountHardLocked(enabled, now)).toBe(true);
     observe({ [field]: 0 });
     expect(getMainAccountHardLockStatus(enabled, now)).toEqual({ enabled: true, state: "ready" });
-    observe({ [field]: 98 });
+    observe({ [field]: 95 });
     expect(getMainAccountHardLockStatus(enabled, now).state).toBe("blocked");
   });
 
   test.each([
-    { shortPercent: 98, weeklyPercent: 50, state: "blocked" },
+    { shortPercent: 95, weeklyPercent: 50, state: "blocked" },
     { shortPercent: 99, weeklyPercent: 20, state: "blocked" },
-    { shortPercent: 97, weeklyPercent: 98, state: "blocked" },
+    { shortPercent: 94, weeklyPercent: 95, state: "blocked" },
     { shortPercent: 20, weeklyPercent: 100, state: "blocked" },
-    { shortPercent: 97, weeklyPercent: 97.99, state: "ready" },
-  ])("5h $shortPercent / weekly $weeklyPercent is $state: either window at 98 blocks alone", ({ state, ...usage }) => {
+    { shortPercent: 94, weeklyPercent: 94.99, state: "ready" },
+  ])("5h $shortPercent / weekly $weeklyPercent is $state: either window at 95 blocks alone", ({ state, ...usage }) => {
     observe({ ...usage, shortWindowSeconds: 18_000 });
     expect(getMainAccountHardLockStatus(enabled, now).state).toBe(state);
   });
@@ -139,14 +139,14 @@ describe("identity-bound main-account hard-lock policy", () => {
     expect(getMainAccountHardLockStatus(enabled, now)).toEqual({ enabled: true, state: "blocked" });
     observe({ shortPercent: 0 });
     expect(getMainAccountHardLockStatus(enabled, now).state).toBe("blocked");
-    observe({ weeklyPercent: 97 });
+    observe({ weeklyPercent: 94 });
     expect(getMainAccountHardLockStatus(enabled, now).state).toBe("ready");
-    observe({ weeklyPercent: 98 });
+    observe({ weeklyPercent: 95 });
     expect(getMainAccountHardLockStatus(enabled, now).state).toBe("blocked");
   });
 
   test("a blocked status reports the latest reset among the blocking windows only", () => {
-    observe({ shortPercent: 99, shortResetAt: now + 60_000, weeklyPercent: 98, weeklyResetAt: now + 600_000 });
+    observe({ shortPercent: 99, shortResetAt: now + 60_000, weeklyPercent: 95, weeklyResetAt: now + 600_000 });
     expect(getMainAccountHardLockStatus(enabled, now)).toEqual({ enabled: true, state: "blocked", resetAt: now + 600_000 });
     observe({ shortPercent: 99, shortResetAt: now + 60_000, weeklyPercent: 40, weeklyResetAt: now + 600_000 });
     expect(getMainAccountHardLockStatus(enabled, now)).toEqual({ enabled: true, state: "blocked", resetAt: now + 60_000 });
@@ -169,7 +169,7 @@ describe("identity-bound main-account hard-lock policy", () => {
   });
 
   test("weekly-only accounts do not use a higher monthly bar", () => {
-    observe({ weeklyPercent: 97, monthlyPercent: 100 });
+    observe({ weeklyPercent: 94, monthlyPercent: 100 });
     expect(getMainAccountHardLockStatus(enabled, now).state).toBe("ready");
   });
 

@@ -76,8 +76,8 @@ afterEach(() => {
 });
 
 describe("main-account hard lock default (#5694)", () => {
-  test("the threshold is 98 percent", () => {
-    expect(MAIN_ACCOUNT_HARD_LOCK_PERCENT).toBe(98);
+  test("the threshold is 95 percent", () => {
+    expect(MAIN_ACCOUNT_HARD_LOCK_PERCENT).toBe(95);
   });
 
   test("an absent key or true enables the policy; only false opts out", () => {
@@ -102,10 +102,10 @@ describe("main-account hard lock default (#5694)", () => {
     )).toBe(false);
   });
 
-  test("97.9 percent is ready and 98 percent is blocked without any key present", () => {
-    observe({ weeklyPercent: 97.9 });
+  test("94.9 percent is ready and 95 percent is blocked without any key present", () => {
+    observe({ weeklyPercent: 94.9 });
     expect(getMainAccountHardLockStatus({}).state).toBe("ready");
-    observe({ shortPercent: 98 });
+    observe({ shortPercent: 95 });
     expect(getMainAccountHardLockStatus({})).toEqual({ enabled: true, state: "blocked" });
     expect(isMainAccountHardLocked({})).toBe(true);
     // The opt-out keeps the same observation admissible.
@@ -114,7 +114,7 @@ describe("main-account hard lock default (#5694)", () => {
   });
 
   test("GET reports the lock as on when no key is stored", async () => {
-    observe({ weeklyPercent: 98 });
+    observe({ weeklyPercent: 95 });
     const response = await request(config());
     expect(await response!.json()).toMatchObject({
       codexMainAccountHardLock: true,
@@ -123,7 +123,7 @@ describe("main-account hard lock default (#5694)", () => {
   });
 
   test("an absent key withholds the main account from admission", () => {
-    observe({ weeklyPercent: 98 });
+    observe({ weeklyPercent: 95 });
     expect(codexAccountUnusableReason(config(), MAIN_CODEX_ACCOUNT_ID, { nativeMainSelectionOnly: true }))
       .toBe("main_hard_locked");
     expect(isCodexAccountUsable(config(), MAIN_CODEX_ACCOUNT_ID, { nativeMainSelectionOnly: true })).toBe(false);

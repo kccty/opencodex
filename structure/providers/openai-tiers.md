@@ -317,8 +317,8 @@ Regression coverage lives in `tests/codex-integration/codex-quota-parser-parity.
 `tests/usage/quota-reset-observation.test.ts`, and `tests/usage/quota-reset-seen-store.test.ts`.
 
 `codexMainAccountHardLock` is a local admission policy that is **on by default** since #5694, at
-`MAIN_ACCOUNT_HARD_LOCK_PERCENT` = 98%. The 5h/short window and the weekly window each govern on
-their own: either one at 98% blocks, and an unknown or invalid reading in one never hides a block
+`MAIN_ACCOUNT_HARD_LOCK_PERCENT` = 95%. The 5h/short window and the weekly window each govern on
+their own: either one at 95% blocks, and an unknown or invalid reading in one never hides a block
 in the other (unknown still admits). Monthly governs only a monthly-only account. A block holds
 until every blocking window reads lower, so its reported `resetAt` is the latest blocking reset,
 omitted when any blocking window has none. In the policy snapshot a reset-only weekly observation
@@ -326,7 +326,7 @@ keeps a blocking weekly tuple, mirroring the short-window rule; monthly-primary 
 It blocks newly admitted identity-matched main-account requests. Pool alternatives remain eligible;
 explicit main selection and stored Direct substitution do not override it. It neither pauses the
 account nor clears upstream cooldown/reauth state, and management quota refresh remains available.
-Only a fresh valid reading below 98%, including 0%, releases a measured block; passing a reset
+Only a fresh valid reading below 95%, including 0%, releases a measured block; passing a reset
 timestamp alone does not. The minute sweep waits locally until the latest known blocking reset;
 when no future reset is known or reads remain blocked, main recovery uses the same capped
 5/10/20/40/60-minute delay calculation as usage-query failures. Skipped ticks do not extend it;
@@ -356,7 +356,7 @@ wants Reserve turns the setting off rather than deleting the key. This is not a 
 last 2%: already-admitted, parallel, unmatched-keyring, or direct upstream traffic can still reach
 exhaustion. Settings and the main-account DTO report enabled state separately from the current
 `off`, `unknown`, `ready`, or `blocked` status. Status semantics stay in
-`tests/codex-integration/main-account-hard-lock-policy.test.ts`; the default-on resolver, the 98%
+`tests/codex-integration/main-account-hard-lock-policy.test.ts`; the default-on resolver, the 95%
 boundary, the admission consequence, and the settings opt-out round trip are covered by the
 hard-lock tests registered in `scripts/test-layout/layout.json`, including
 `tests/config/settings-main-account-hard-lock.test.ts`.
@@ -368,7 +368,7 @@ qualifies, not only a seven-day or monthly window. The policy trusts that one re
 it does not require repeated observations or independently confirm upstream window completeness.
 Omitted secondary/tertiary fields, a long auxiliary window without a usage reading, an unknown primary duration, partial headers, or invalid usage cannot prove that the
 short window disappeared. Replacement proof belongs only to that observation and is never persisted;
-the resulting weekly/monthly window still blocks at 98%. This prevents old short-window exhaustion
+the resulting weekly/monthly window still blocks at 95%. This prevents old short-window exhaustion
 from surviving indefinitely on a now weekly/monthly account. Coverage lives in
 `tests/codex-integration/main-quota-evidence-validation.test.ts`,
 `tests/codex-integration/main-quota-provenance.test.ts`, and

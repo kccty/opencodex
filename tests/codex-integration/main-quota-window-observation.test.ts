@@ -240,12 +240,12 @@ describe("declared short-window producer evidence", () => {
     await fetchMainAccountInfo(true);
     const cfg = { codexMainAccountHardLock: true };
     expect(getMainPolicyQuota()?.weeklyPercent).toBe(Number(value));
-    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < 98 ? "ready" : "blocked");
+    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < 95 ? "ready" : "blocked");
     clearAccountQuota();
     applyAccountQuotaFromUpstreamHeaders(MAIN, new Headers({ "x-codex-primary-used-percent": String(value) }),
       undefined, writerFor());
     expect(getMainPolicyQuota()?.weeklyPercent).toBe(Number(value));
-    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < 98 ? "ready" : "blocked");
+    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < 95 ? "ready" : "blocked");
     expect(calls).toBe(1);
   });
 
