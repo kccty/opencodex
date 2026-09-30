@@ -152,10 +152,7 @@ this translated wire. Kiro (`src/adapters/kiro-tools.ts`), Google (its wire comp
 Responses (`src/responses/muse-tool-name-alias.ts`, gated to `api.meta.ai`) each retain their own
 equivalent normalization and restoration.
 
-These compatibility guards are covered by focused tests and should stay close to the adapters that
-need them.
-
-Before either native Responses passthrough or a translated Chat adapter consumes the raw request, the shared `src/responses/` parser replaces `input_image` blocks older than the newest completed compaction marker with a fixed text marker; the sanitized body also feeds proxy continuation state.
+These compatibility guards are covered by focused tests and should stay close to the adapters that need them. Before either native Responses passthrough or a translated Chat adapter consumes the raw request, the shared `src/responses/` parser also replaces `input_image` blocks older than the newest completed compaction marker with a fixed text marker ([ADR-0124](../decisions/ADR-0124-responses-http-sse.md)); the sanitized body also feeds proxy continuation state.
 
 Responses passthrough always removes output-only `status` from `reasoning` input items, including
 items that retain opaque `encrypted_content`. The prior retains-blob-keeps-status invariant was
