@@ -19,7 +19,7 @@ import { getMainQuotaCredentialGeneration, observeMainQuotaCredential } from "./
 import { applyAccountQuotaFromUpstreamHeaders, getAccountQuota, type StoredAccountQuota } from "./quota";
 import { CodexWarmupError, codexWarmupFailureReason, warmCodexAccount } from "./warmup";
 import {
-  completedByAccount, retryAfterByAccount, scheduledByAccount, quotaRefreshAfterByAccount,
+  completedByAccount, percentProbeNextByAccount, retryAfterByAccount, scheduledByAccount, quotaRefreshAfterByAccount,
   resetCodexQuotaAutoRefreshStateForTests,
   type CodexQuotaAutoRefreshWindows, type CodexQuotaRetry,
 } from "./quota-auto-refresh-state";
@@ -30,6 +30,12 @@ export const FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const RETRY_MS = 5 * 60_000;
 const MAX_RETRY_MS = 60 * 60_000;
 const CONCURRENCY = 4;
+/** Percentage re-read cadence for accounts the lane is actively serving. */
+export const PERCENT_REFRESH_MS = 5 * 60_000;
+/** A failed re-read backs off longer than the cadence; the App's own usage poll is ~30s, so the endpoint tolerates far more than this. */
+const PERCENT_REFRESH_BACKOFF_MS = 15 * 60_000;
+/** A snapshot older than this means the account is idle; idle accounts are never probed. */
+const PERCENT_PROBE_ACTIVITY_MS = 30 * 60_000;
 
 export interface CodexQuotaAutoRefreshStatus {
   fiveHourAvailable: boolean;
@@ -362,9 +368,30 @@ export async function runCodexQuotaAutoRefresh(
         rememberWindows(config, accountId, quotaFor(accountId));
         const quota = quotaFor(accountId);
         // A known deadline remains actionable even when its usage snapshot is old.
-        // Only discover missing windows; never poll merely to keep percentages fresh.
+        // Only discover missing windows; idle accounts are never polled merely to keep
+        // percentages fresh.
         if (hasScheduledWindows(config, accountId)) {
           quotaRefreshAfterByAccount.delete(accountId);
+          // Response headers carry some windows on some responses only, so a scheduled
+          // window's percent can silently go stale while traffic keeps bumping `updatedAt`
+          // (a frozen weekly left the hard lock admitting against a days-old reading while
+          // the account burned to 100%). A snapshot that still moves means the account is
+          // being served: re-read its percentages on a slow cadence so every governing
+          // window stays observable between resets.
+          if (quota
+            && now - quota.updatedAt < PERCENT_PROBE_ACTIVITY_MS
+            && (percentProbeNextByAccount.get(accountId) ?? 0) <= now) {
+            percentProbeNextByAccount.set(accountId, now + PERCENT_REFRESH_MS);
+            try {
+              await refresh(config, accountId);
+            } catch (error) {
+              // A contended native-main claim is ordinary under load; retry sooner than the
+              // cadence so a busy account still gets its first fresh reading quickly. Any
+              // other failure (e.g. a WHAM 429) backs off past the cadence.
+              percentProbeNextByAccount.set(accountId,
+                now + (error instanceof NativeMainBusyError ? LOCAL_BUSY_RETRY_MS : PERCENT_REFRESH_BACKOFF_MS));
+            }
+          }
         } else if ((!quota || now - quota.updatedAt >= RETRY_MS)
           && (liveRetry(quotaRefreshAfterByAccount, accountId, credentialGeneration(accountId))?.after ?? 0) <= now) {
           deferRetry(quotaRefreshAfterByAccount, accountId, now, credentialGeneration(accountId));

@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { percentProbeNextByAccount } from "../../src/codex/quota-auto-refresh-state";
 import {
   codexQuotaAutoRefreshStatus,
   dueCodexQuotaAutoRefreshWindows,
   resetCodexQuotaAutoRefreshForTests,
   runCodexQuotaAutoRefresh,
+  PERCENT_REFRESH_MS,
   type CodexQuotaAutoRefreshWindows,
 } from "../../src/codex/quota-auto-refresh";
 import {
@@ -232,7 +234,9 @@ describe("Codex quota window auto refresh", () => {
     writeFileSync(join(testHome, "config.json"), JSON.stringify(cfg));
     let observed: StoredAccountQuota | null = quota({
       shortResetAt: RESET_SECONDS + 18_000, weeklyResetAt: RESET_SECONDS + 18_000,
-      updatedAt: NOW - 600_000,
+      // Idle snapshot: an active one now re-reads percentages on a cadence (see the
+      // scheduled-window freshness probe), which this deadlines-only test does not model.
+      updatedAt: NOW - 45 * 60_000,
     });
     let probes = 0;
     let warmups = 0;
@@ -265,6 +269,37 @@ describe("Codex quota window auto refresh", () => {
     expect(warmups).toBe(1);
   });
 
+  test("active scheduled accounts re-read stale percentages on a bounded cadence", async () => {
+    // Response headers carry some windows on some responses only, so a scheduled window's
+    // percent can go stale while traffic keeps the snapshot fresh (frozen-weekly regression).
+    const cfg = config();
+    cfg.codexQuotaAutoRefresh = { "pool-a": { fiveHour: true, weekly: true } };
+    writeFileSync(join(testHome, "config.json"), JSON.stringify(cfg));
+    let observed: StoredAccountQuota | null = quota({
+      shortResetAt: RESET_SECONDS + 18_000, weeklyResetAt: RESET_SECONDS + 18_000,
+    });
+    let probes = 0;
+    let warmups = 0;
+    const deps = {
+      getQuota: (id: string) => id === "pool-a" ? observed : null,
+      refreshQuota: async () => { probes += 1; },
+      warmAccount: async () => { warmups += 1; },
+    };
+    await runCodexQuotaAutoRefresh(cfg, NOW, deps);
+    expect(probes).toBe(1);
+    await runCodexQuotaAutoRefresh(cfg, NOW + 60_000, deps);
+    expect(probes).toBe(1);
+    await runCodexQuotaAutoRefresh(cfg, NOW + PERCENT_REFRESH_MS, deps);
+    expect(probes).toBe(2);
+    observed = quota({
+      shortResetAt: RESET_SECONDS + 18_000, weeklyResetAt: RESET_SECONDS + 18_000,
+      updatedAt: NOW - 45 * 60_000,
+    });
+    await runCodexQuotaAutoRefresh(cfg, NOW + 2 * PERCENT_REFRESH_MS + 60_000, deps);
+    expect(probes).toBe(2);
+    expect(warmups).toBe(0);
+  });
+
   test("missing-window discovery backs off to an hour and stops when passive headers supply it", async () => {
     const cfg = config();
     let observed = quota({ shortResetAt: RESET_SECONDS + 86_400, weeklyResetAt: undefined, updatedAt: NOW - 600_000 });
@@ -293,6 +328,8 @@ describe("Codex quota window auto refresh", () => {
   test("activation without next-window headers discovers the next deadline once", async () => {
     const cfg = config();
     cfg.codexQuotaAutoRefresh = { "pool-a": { fiveHour: true } };
+    // Isolate the discovery semantics from the scheduled-window percent cadence.
+    percentProbeNextByAccount.set("pool-a", NOW + 24 * 60 * 60_000);
     let observed = quota();
     let probes = 0;
     let warmups = 0;
@@ -317,7 +354,8 @@ describe("Codex quota window auto refresh", () => {
     let probes = 0;
     let warmups = 0;
     const deps = {
-      getQuota: () => quota({ updatedAt: NOW - 600_000 }),
+      // Idle snapshot: an active one triggers the scheduled-window percent re-read cadence.
+      getQuota: () => quota({ updatedAt: NOW - 45 * 60_000 }),
       refreshQuota: async () => { probes++; },
       warmAccount: async () => { warmups++; throw new Error("fixture failure"); },
     };
@@ -427,6 +465,7 @@ describe("Codex quota window auto refresh", () => {
     const deps = {
       getQuota: (id: string) => id === "pool-a"
         ? quota({ shortResetAt: observed, weeklyResetAt: observed }) : null,
+      refreshQuota: async () => {},
       warmAccount: async () => { warmups += 1; },
     };
     await runCodexQuotaAutoRefresh(cfg, NOW, deps);
@@ -453,6 +492,7 @@ describe("Codex quota window auto refresh", () => {
     const warmed: string[] = [];
     await runCodexQuotaAutoRefresh(cfg, NOW, {
       getQuota: id => id === "pool-a" ? quota() : null,
+      refreshQuota: async () => {},
       warmAccount: async (_config, id) => { warmed.push(id); },
       persistCompleted: recordMarkers,
     });
@@ -474,6 +514,7 @@ describe("Codex quota window auto refresh", () => {
     let writes = 0;
     const deps = {
       getQuota: (id: string) => id === "pool-a" ? quota() : null,
+      refreshQuota: async () => {},
       warmAccount: async (): Promise<void | false> => {
         attempts += 1;
         if (attempts === 1) return false;
@@ -516,6 +557,7 @@ describe("Codex quota window auto refresh", () => {
     const deps = {
       getQuota: (id: string) => id === "pool-a"
         ? quota({ shortResetAt: observed, weeklyResetAt: observed }) : null,
+      refreshQuota: async () => {},
       warmAccount: async () => { warmups += 1; },
       persistCompleted: persist,
     };
