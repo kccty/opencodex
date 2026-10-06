@@ -1337,6 +1337,14 @@ export interface OcxComboConfig {
    * be represented by this routed combo. Never inferred from `alias`.
    */
   nativeAlias?: boolean;
+  /**
+   * Fail over to the next target after an ambiguous connection reset instead of
+   * stopping the request. Opt-in: the failed member may already have run the
+   * turn, so the hop spends the request's single ambiguous-resend grant and
+   * applies only to a self-contained body whose second send can only repeat
+   * the inference.
+   */
+  ambiguousFailover?: boolean;
   /** Display-only label for the public catalog row. Required for native aliases. */
   displayName?: string;
 }

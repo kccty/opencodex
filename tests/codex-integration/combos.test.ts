@@ -1638,6 +1638,7 @@ describe("combo validation and normalization", () => {
       imageInput: "auto",
       alias: null,
       nativeAlias: false,
+      ambiguousFailover: false,
       displayName: null,
       targets: [{ provider: "a", model: "m1", weight: 2, lastResort: false }],
     });

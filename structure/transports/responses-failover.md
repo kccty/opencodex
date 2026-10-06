@@ -392,6 +392,9 @@ replacement rows (pre-header, SSE and WebSocket): a status the client would rese
 refusal, and anything else keeps its status and the non-replayable marker. The direct path skips
 the streamed opaque-blob rebuild and settles the preflight's projected failure by the same rule.
 Policy fallback does not hop on a marked answer.
+
+One combo-level opt-out exists: `combos.<id>.ambiguousFailover: true` claims the request's same
+single ambiguous-resend allowance to authorise the hop the marker forbids, via `ambiguousFailoverHopAuthorized` — self-contained bodies only, never beside a replacement.
 A scope derived from a budget this factory did not build (the shape-tested bridge in
 `src/lib/request-execution-budget.ts`) remembers a grant it claimed through the bridge, keyed by
 the bridged parent, so every sibling scope reports it spent even when that parent predates the

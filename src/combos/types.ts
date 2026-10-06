@@ -50,6 +50,8 @@ export interface NormalizedComboConfig {
   alias: string | null;
   /** Explicit native-family alias opt-in. */
   nativeAlias: boolean;
+  /** Opt-in: hop to the next target on an ambiguous reset, spending the request's single resend grant. */
+  ambiguousFailover: boolean;
   /** Display-only label for the catalog row, or null when unset. */
   displayName: string | null;
   targets: NormalizedComboTarget[];
@@ -216,6 +218,9 @@ export function comboConfigIssues(
       path: ["reasoningEffortMode"],
       message: 'reasoningEffortMode must be "strict" or "adaptive"',
     });
+  }
+  if (body.ambiguousFailover !== undefined && typeof body.ambiguousFailover !== "boolean") {
+    issues.push({ path: ["ambiguousFailover"], message: "ambiguousFailover must be a boolean" });
   }
 
   if (body.alias !== undefined) {
@@ -394,6 +399,7 @@ export function normalizeComboConfig(raw: OcxComboConfig): NormalizedComboConfig
     imageInput: raw.imageInput === "disabled" ? "disabled" : "auto",
     alias: alias || null,
     nativeAlias: raw.nativeAlias === true,
+    ambiguousFailover: raw.ambiguousFailover === true,
     displayName: displayName || null,
     targets: raw.targets.map(target => ({
       provider: target.provider.trim(),

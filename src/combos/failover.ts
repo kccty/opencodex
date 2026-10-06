@@ -769,3 +769,30 @@ export function comboFailureDecision(
   }
   return "stop";
 }
+
+/**
+ * Whether a combo may hop to the next target after an AMBIGUOUS failure (pre-header reset,
+ * closed-before-response) that the stage table refuses to replay by default.
+ *
+ * The stop is the documented safety boundary: the failed member may already have run the
+ * turn, and a second send of the same body is a duplicate inference even when it lands on a
+ * different target. This helper is the operator's narrow opt-out, and every axis must hold:
+ * the failure must actually be the ambiguous class, the combo must have opted in, the body
+ * must be self-contained (its second send can only repeat the inference — reset-replay.ts
+ * owns that judgment), the request's single ambiguous-resend grant must not already be spent,
+ * and the claim — evaluated LAST so an earlier refusal never burns the grant — must succeed.
+ * The claim is the authorisation: a request that hopped here can never also buy a same-target
+ * replacement later, and a grant a member already spent refuses the hop.
+ */
+export function ambiguousFailoverHopAuthorized(args: {
+  nonReplayable: boolean;
+  upstreamCode?: string;
+  spentReplacement: boolean;
+  ambiguousFailover: boolean;
+  selfContainedBody: boolean;
+  claimResendGrant: () => boolean;
+}): boolean {
+  if (!args.nonReplayable && !isNonReplayableUpstreamCode(args.upstreamCode)) return false;
+  if (args.spentReplacement || !args.ambiguousFailover || !args.selfContainedBody) return false;
+  return args.claimResendGrant();
+}

@@ -17,6 +17,7 @@ import type { OcxComboDefaultEffort, OcxConfig } from "../../types";
 import type { RequestLogContext } from "../request-log";
 import type { HandleResponsesOptions, ResponsesDispatchers, ConsumedComboFailure } from "./core-options";
 import type { TranslatorBudget } from "../../lib/translator-budget";
+import { selfContainedResponsesBody } from "./reset-replay";
 import {
   getCombo,
   comboRequestHasImageInput,
@@ -92,6 +93,7 @@ import { preflightComboStreamResponse } from "./combo-stream-preflight";
 import { streamingContextOverflowResponse, jsonContextOverflowResponse } from "./context-overflow";
 import { mandatoryResponsesReasoningReplayUnavailable } from "./core-replay";
 import { settleOperatorReplacement } from "../../lib/upstream-retry";
+import { ambiguousFailoverHopAuthorized } from "../../combos/failover";
 import { createComboProtocolLanes, dispatchNativeComboChild } from "./core-combo-native";
 import { clientWireOf } from "../inference/client-wire";
 
@@ -927,11 +929,24 @@ export async function executeComboResponses(
     }
     // A non-replayable failure (the answer to a spent ambiguous-reset replacement) may follow a
     // send that already ran the turn, so no later target may receive it, whatever its status says.
-    const failureDecision = failure.nonReplayable || spentReplacement
-      ? "stop"
-      : comboFailureDecision(failure.response.status, failure.classificationText, {
-        code: failure.upstreamCode,
-      });
+    // Operator opt-out of that stop: `ambiguousFailover` spends the request's single
+    // ambiguous-resend grant to hop to the next target instead, under the axes
+    // ambiguousFailoverHopAuthorized enforces (self-contained body, unspent grant).
+    const ambiguousFailoverHop = ambiguousFailoverHopAuthorized({
+      nonReplayable: failure.nonReplayable === true,
+      upstreamCode: failure.upstreamCode,
+      spentReplacement,
+      ambiguousFailover: combo.ambiguousFailover === true,
+      selfContainedBody: selfContainedResponsesBody(rawBody),
+      claimResendGrant: () => comboSendScope?.claimAmbiguousResend?.(1) === true,
+    });
+    const failureDecision = ambiguousFailoverHop
+      ? "hop"
+      : failure.nonReplayable || spentReplacement
+        ? "stop"
+        : comboFailureDecision(failure.response.status, failure.classificationText, {
+          code: failure.upstreamCode,
+        });
     const wantsStream = (rawBody as { stream?: unknown } | null)?.stream === true;
     // Local byte admission has its own diagnostic; do not relabel it as an upstream refusal.
     const classifyOverflow = failure.response.status === 413
