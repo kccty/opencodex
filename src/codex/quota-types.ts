@@ -82,6 +82,8 @@ export type StoredAccountQuota = {
   /** Local short-usage observation time; partial/credit updates do not refresh it. */
   shortObservedAt?: number;
   shortWindowSeconds?: number;
+  /** Decayed EMA of one-observation short-window increases; the hard lock reserves this burn. */
+  shortBurnPerRequestPercent?: number;
   customWindows?: Array<{ label: string; percent: number; resetAt?: number }>;
   resetCredits?: number;
   /** Monthly usage came from an explicitly monthly PRIMARY, not supplementary tertiary, window. */

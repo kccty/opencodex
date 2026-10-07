@@ -1,5 +1,5 @@
 import { isCompleteCodexQuotaRecoverySnapshot } from "../codex/quota";
-import type { StoredAccountQuota } from "../codex/quota-types";
+import { MAIN_ACCOUNT_HARD_LOCK_PERCENT, type StoredAccountQuota } from "../codex/quota-types";
 import { clearComboTargetCooldownsForProvider } from "./failover";
 
 /** The provider lane a Codex account quota observation speaks for. */
@@ -22,5 +22,22 @@ export function liftCodexLaneComboCooldowns(quota: StoredAccountQuota | null): n
   // The completeness predicate already refuses an exhausted snapshot, so a single call
   // answers both "is this a real reading" and "is the account healthy".
   if (!isCompleteCodexQuotaRecoverySnapshot(quota)) return 0;
+  // The recovery predicate refuses only a >=100 reading, while admission cuts the account off
+  // at 95 — earlier once per-request burn is projected. Lifting inside that band hands combos a
+  // lane that cannot serve: the next send is refused locally and simply re-cools the target.
+  if (insideMainAccountHardLockBand(quota)) return 0;
   return clearComboTargetCooldownsForProvider(CODEX_LANE_PROVIDER);
+}
+
+/** The same band admission refuses: the static gate, or its burn projection, on any window. */
+function insideMainAccountHardLockBand(quota: StoredAccountQuota | null): boolean {
+  if (!quota) return false;
+  const governing = [quota.shortPercent, quota.weeklyPercent,
+    ...(quota.shortPercent === undefined && quota.weeklyPercent === undefined
+      ? [quota.monthlyPercent] : [])];
+  if (governing.some(value => typeof value === "number" && Number.isFinite(value)
+    && value >= MAIN_ACCOUNT_HARD_LOCK_PERCENT)) return true;
+  return typeof quota.shortPercent === "number" && Number.isFinite(quota.shortPercent)
+    && typeof quota.shortBurnPerRequestPercent === "number" && Number.isFinite(quota.shortBurnPerRequestPercent)
+    && quota.shortPercent + quota.shortBurnPerRequestPercent >= 100;
 }

@@ -267,6 +267,9 @@ function assignCarriedShort(
   if (existing.shortObservedAt !== undefined) next.shortObservedAt = existing.shortObservedAt;
   if (existing.shortResetAt !== undefined) next.shortResetAt = existing.shortResetAt;
   if (existing.shortWindowSeconds !== undefined) next.shortWindowSeconds = existing.shortWindowSeconds;
+  if (existing.shortBurnPerRequestPercent !== undefined) {
+    next.shortBurnPerRequestPercent = existing.shortBurnPerRequestPercent;
+  }
 }
 
 function snapshotHasCustom(quota: Omit<StoredAccountQuota, "updatedAt">): boolean {
@@ -326,6 +329,32 @@ export function setAccountQuotaFromParsed(
     if (!isMain && policyQuota) observeCodexLowQuota(accountId, policyQuota);
     notifyCodexQuotaSnapshot(accountId, next);
   }
+}
+
+/**
+ * Decayed estimate of how much one response observation can raise the short window, clamped to
+ * [0, 25]. The hard lock reserves this burn ahead of the raw percent: a 90% reading whose last
+ * observation jumped 30 points is already terminal even though it sits below the static 95 gate.
+ * Only same-window increases are evidence — a reset or any lower reading keeps the previous
+ * estimate, because request SIZE did not change with the window rollover.
+ */
+function nextShortBurnPercent(
+  quota: Pick<StoredAccountQuota, "shortPercent" | "shortResetAt">,
+  existing: StoredAccountQuota | undefined,
+): number | undefined {
+  const incoming = quota.shortPercent;
+  const prior = existing?.shortPercent;
+  if (!finitePercent(incoming) || !finitePercent(prior) || incoming <= prior) {
+    return existing?.shortBurnPerRequestPercent;
+  }
+  if (quota.shortResetAt !== undefined && existing?.shortResetAt !== undefined
+    && quota.shortResetAt !== existing.shortResetAt) {
+    return existing?.shortBurnPerRequestPercent;
+  }
+  const delta = incoming - prior;
+  const previous = existing?.shortBurnPerRequestPercent;
+  const estimate = previous === undefined ? delta : Math.round(0.6 * previous + 0.4 * delta);
+  return Math.min(25, Math.max(0, estimate));
 }
 
 /**
@@ -403,6 +432,7 @@ function mergeAccountQuota(
     if (quota.shortPercent !== undefined) {
       next.shortPercent = quota.shortPercent;
       if (Number.isFinite(quota.shortPercent)) next.shortObservedAt = next.updatedAt;
+      next.shortBurnPerRequestPercent = nextShortBurnPercent(quota, existing);
     }
     if (quota.shortResetAt !== undefined) next.shortResetAt = quota.shortResetAt;
     if (quota.shortWindowSeconds !== undefined) next.shortWindowSeconds = quota.shortWindowSeconds;

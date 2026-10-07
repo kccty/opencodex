@@ -31,7 +31,7 @@ function resetTimestamp(value: number | undefined): number | undefined {
   return value < 10_000_000_000 ? value * 1000 : value;
 }
 
-type WindowReading = { percent: number | undefined; resetAt: number | undefined };
+type WindowReading = { percent: number | undefined; resetAt: number | undefined; burn?: number };
 
 /**
  * The windows that govern the lock. The 5h and weekly windows each govern on their own, so either
@@ -44,7 +44,9 @@ function governingWindows(quota: NonNullable<ReturnType<typeof getMainPolicyQuot
     || quota.shortWindowSeconds !== undefined;
   const hasWeekly = quota.weeklyPercent !== undefined || quota.weeklyResetAt !== undefined;
   const windows: WindowReading[] = [];
-  if (hasShort) windows.push({ percent: quota.shortPercent, resetAt: quota.shortResetAt });
+  if (hasShort) {
+    windows.push({ percent: quota.shortPercent, resetAt: quota.shortResetAt, burn: quota.shortBurnPerRequestPercent });
+  }
   if (hasWeekly) windows.push({ percent: quota.weeklyPercent, resetAt: quota.weeklyResetAt });
   if (windows.length === 0) windows.push({ percent: quota.monthlyPercent, resetAt: quota.monthlyResetAt });
   return windows;
@@ -64,7 +66,13 @@ export function getMainAccountHardLockStatus(
   const quota = getMainPolicyQuota();
   if (!quota) return { enabled: true, state: "unknown" };
   const windows = governingWindows(quota);
-  const blocking = windows.filter(w => validPercent(w.percent) && w.percent >= MAIN_ACCOUNT_HARD_LOCK_PERCENT);
+  // The static gate reacts to a reading that already crossed 95. The reserve projects the next
+  // one: when the decayed per-observation burn estimate says the next response can finish the
+  // window (percent + burn >= 100), waiting for the raw percent to reach 95 is the same jump
+  // blindness that carried 97 straight to 100 past the old 98 gate.
+  const blocking = windows.filter(w => validPercent(w.percent)
+    && (w.percent >= MAIN_ACCOUNT_HARD_LOCK_PERCENT
+      || (validPercent(w.burn) && w.percent + w.burn >= 100)));
   if (blocking.length > 0) {
     // The lock holds until every blocking window reads lower, so the earliest possible unlock is
     // the latest blocking reset. One blocking window without a future reset makes it unknowable.

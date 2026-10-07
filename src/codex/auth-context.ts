@@ -857,7 +857,14 @@ export function cooldownErrorResponse(
   const headers = new Headers(res.headers);
   if (!(err instanceof CodexReserveUnavailableError)
     && (!(err instanceof CodexMainAccountHardLockError) || err.resetAt !== undefined)) {
-    headers.set("Retry-After", String(Math.max(1, Math.ceil((err.cooldownUntil - now) / 1000))));
+    // The hard lock's window reset can be hours away, but that deadline is not a cooldown: a
+    // fresh lower reading releases admission immediately. Cap the advertised wait at the same
+    // 15-minute reset-derived ceiling account cooldowns use, so a re-attempting combo target
+    // re-cools briefly instead of being parked until the window ends.
+    const waitMs = err instanceof CodexMainAccountHardLockError
+      ? Math.min(err.cooldownUntil - now, 15 * 60_000)
+      : err.cooldownUntil - now;
+    headers.set("Retry-After", String(Math.max(1, Math.ceil(waitMs / 1000))));
   }
   return new Response(res.body, { status: res.status, headers });
 }
