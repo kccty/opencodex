@@ -4,6 +4,7 @@ import { capturePoolQuotaWriter, getValidCodexToken, isCodexAccountGenerationLiv
 import type { PoolQuotaWriter } from "../quota-types";
 import { isValidWhamHistoryObservation, getAccountQuota, isCompleteCodexQuotaRecoverySnapshot, parseUsageQuota, setAccountQuotaFromParsed } from "../quota";
 import type { StoredAccountQuota, WhamUsageResponse } from "../quota";
+import { liftCodexLaneComboCooldowns } from "../../combos/quota-recovery-lift";
 import type { ManualResetRefreshLineage } from "../routing";
 import { clearAccountNeedsReauth, markAccountNeedsReauth } from "../account-runtime-state";
 import { captureConfigGeneration } from "../../lib/state-store-sweeper";
@@ -370,6 +371,9 @@ export async function commitPoolQuotaResponse(
   const validPolicyObservation = isValidWhamHistoryObservation(data);
   setAccountQuotaFromParsed(accountId, quota, writerGeneration, undefined, validPolicyObservation ? quota : null,
     ctx.poolWriter && validPolicyObservation ? { writer: ctx.poolWriter, observedAt, source: "wham", raw: quota } : undefined);
+  // One healthy pool account is enough to serve the Codex lane: lift its combo cooldowns the
+  // same way the main-account probe does, so a recovered pool member unblocks combos too.
+  liftCodexLaneComboCooldowns(getAccountQuota(accountId));
   return {
     quota: getAccountQuota(accountId),
     needsReauth: false,

@@ -615,6 +615,7 @@
   "combo-codex-exhaustion-cooldown.test.ts": "codex-integration",
   "combo-permanent-failure-cooldown.test.ts": "codex-integration",
   "combo-ambiguous-failover.test.ts": "codex-integration",
+  "combo-quota-recovery-lift.test.ts": "codex-integration",
   "combo-reset-window-model-scope.test.ts": "codex-integration",
   "combo-child-headers.test.ts": "routing",
   "combo-last-resort.test.ts": "codex-integration",

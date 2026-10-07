@@ -305,6 +305,24 @@ export function clearComboTargetCooldowns(comboId?: string): void {
   }
 }
 
+/**
+ * Remove every live cooldown for ONE provider's targets across all combos, returning how
+ * many lifted. The scoped twin of clearComboTargetCooldowns: quota recovery is evidence
+ * about a provider lane, not about one combo, and a per-combo clear would leave the same
+ * member cooling in every sibling that shares it.
+ */
+export function clearComboTargetCooldownsForProvider(provider: string): number {
+  let lifted = 0;
+  for (const key of targetCooldowns.keys()) {
+    const target = key.slice(key.indexOf("\0") + 1);
+    if (target.slice(0, target.indexOf("/")) === provider) {
+      targetCooldowns.delete(key);
+      lifted += 1;
+    }
+  }
+  return lifted;
+}
+
 export type ComboFailureDecision = "hop" | "stop";
 export type ComboFailureCooldownScope = "none" | "target" | "provider";
 
