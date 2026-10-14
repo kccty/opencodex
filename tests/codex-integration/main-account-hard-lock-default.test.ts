@@ -76,8 +76,8 @@ afterEach(() => {
 });
 
 describe("main-account hard lock default (#5694)", () => {
-  test("the threshold is 95 percent", () => {
-    expect(MAIN_ACCOUNT_HARD_LOCK_PERCENT).toBe(95);
+  test("the threshold is 98 percent", () => {
+    expect(MAIN_ACCOUNT_HARD_LOCK_PERCENT).toBe(98);
   });
 
   test("an absent key or true enables the policy; only false opts out", () => {
@@ -86,7 +86,7 @@ describe("main-account hard lock default (#5694)", () => {
     expect(isMainAccountHardLockEnabled({ codexMainAccountHardLock: true })).toBe(true);
     expect(isMainAccountHardLockEnabled({ codexMainAccountHardLock: false })).toBe(false);
     // Absent is not "no signal" for the status reader either: it reports the default as on.
-    expect(getMainAccountHardLockStatus({})).toEqual({ enabled: true, state: "unknown" });
+    expect(getMainAccountHardLockStatus({})).toMatchObject({ enabled: true, state: "unknown" });
   });
 
   test("a malformed hand edit parses to the default instead of disabling the policy", () => {
@@ -102,19 +102,19 @@ describe("main-account hard lock default (#5694)", () => {
     )).toBe(false);
   });
 
-  test("94.9 percent is ready and 95 percent is blocked without any key present", () => {
-    observe({ weeklyPercent: 94.9 });
+  test("97.9 percent is ready and 98 percent is blocked without any key present", () => {
+    observe({ weeklyPercent: 97.9 });
     expect(getMainAccountHardLockStatus({}).state).toBe("ready");
-    observe({ shortPercent: 95 });
-    expect(getMainAccountHardLockStatus({})).toEqual({ enabled: true, state: "blocked" });
+    observe({ shortPercent: 98 });
+    expect(getMainAccountHardLockStatus({})).toMatchObject({ enabled: true, state: "blocked" });
     expect(isMainAccountHardLocked({})).toBe(true);
     // The opt-out keeps the same observation admissible.
     expect(getMainAccountHardLockStatus({ codexMainAccountHardLock: false }))
-      .toEqual({ enabled: false, state: "off" });
+      .toMatchObject({ enabled: false, state: "off" });
   });
 
   test("GET reports the lock as on when no key is stored", async () => {
-    observe({ weeklyPercent: 95 });
+    observe({ weeklyPercent: 98 });
     const response = await request(config());
     expect(await response!.json()).toMatchObject({
       codexMainAccountHardLock: true,
@@ -123,7 +123,7 @@ describe("main-account hard lock default (#5694)", () => {
   });
 
   test("an absent key withholds the main account from admission", () => {
-    observe({ weeklyPercent: 95 });
+    observe({ weeklyPercent: 98 });
     expect(codexAccountUnusableReason(config(), MAIN_CODEX_ACCOUNT_ID, { nativeMainSelectionOnly: true }))
       .toBe("main_hard_locked");
     expect(isCodexAccountUsable(config(), MAIN_CODEX_ACCOUNT_ID, { nativeMainSelectionOnly: true })).toBe(false);

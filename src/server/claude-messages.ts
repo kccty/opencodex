@@ -21,13 +21,22 @@ import { normalizeAnthropicImages } from "../adapters/anthropic-image-normalize"
 import { createToolCallIdAllocator } from "../adapters/tool-call-id";
 import { openAIChatSerializesThinking } from "../adapters/openai-chat/messages";
 import { messagesToResponsesTranslation } from "../protocols/codecs/messages";
-import { AnthropicRequestError, DesktopModelMappingUnavailableError, extractOcxEffortDirective, extractOcxRouteDirective, resolveInboundModel, type ClaudeCacheKeySource } from "../claude/inbound";
+import {
+  messagesDirectPlanHolds,
+  messagesDirectRequestOption,
+  messagesDirectTraceDecline,
+  planMessagesAntigravityDirect,
+  type MessagesDirectPlan,
+} from "./messages-antigravity-direct";
+import { AnthropicRequestError, DesktopModelMappingUnavailableError, extractOcxEffortDirective, extractOcxRouteDirective, nativeAnthropicProjection, resolveInboundModel, type ClaudeCacheKeySource } from "../claude/inbound";
+import { nativeReasoningTag, type NativeReasoningOwner } from "../responses/reasoning-replay-cache";
 import { isKnownDesktop3pModelId, resolveDesktop3pAlias } from "../claude/desktop-3p";
 import { resolveAlias, claudeCodeNativeAlias, legacyAliasForNative } from "../claude/alias";
 import { recordDesktopRequest } from "../claude/desktop-health";
 import { stripOneMillionMarker } from "../claude/context-windows";
 import { captureClaudeInbound } from "../claude/inbound-debug";
 import { claudeCodeForIngress } from "../claude/intercept/model-bindings";
+import { classifyInterceptClient } from "../claude/intercept/client-class";
 import { analyzeClaudeCompatibility, isClaudeCompatibilityMode } from "../claude/compatibility";
 import { carriesMessageThread, messageThreadUnsupportedResponse } from "../claude/message-threads";
 import {
@@ -38,7 +47,10 @@ import {
   REPLAY_REFUSED_STATUS,
   UPSTREAM_RESET_REPLAY_REFUSED_CODE,
 } from "../lib/upstream-retry";
+import { UNDECLARED_TOOL_CALL_ERROR_CODE } from "../lib/errors";
 import { resolveClientRetryAfter } from "../lib/retry-after";
+import { anthropicRateLimitHeaders } from "./anthropic-rate-limit-headers";
+import { upstreamMessagesRequestIdHeaders } from "./messages-response-headers";
 import {
   anthropicErrorBody,
   anthropicErrorResponse,
@@ -59,6 +71,7 @@ import { resolveWireProtocolOverride } from "./adapter-resolve";
 import type { OcxConfig } from "../types";
 import { readJsonRequestBody, resolveInboundBodyLimitBytes } from "./request-decompress";
 import { addFinalRequestLog, httpStatusForRequestLogTerminal, recordFirstOutput, type RequestLogContext } from "./request-log";
+import { recordGenerationEvent } from "./request-log-generation-window";
 import { createFinalRequestLog } from "./inference/final-log";
 import {
   conversationIdFromClaudeMetadata,
@@ -72,16 +85,20 @@ import { clientWireOf } from "./inference/client-wire";
 import { directEncodersApply } from "./inference/client-encoder-delivery";
 import type { ClientEncoderOption } from "./responses/core-options";
 import { handleResponses } from "./responses";
+import { previewXaiOauthWireModel } from "./responses/core-normalize";
 import { upstreamWireForAdapter } from "../protocols/contract";
 import { createProtocolEnvelope, type ProtocolEnvelope } from "../protocols/envelope";
 import { featuresFromMessagesBody, type ProtocolFeature } from "../protocols/features";
 import { credentialDomainFor, messagesBodyHasOpaqueState } from "../protocols/opaque-state";
-import { hasAnthropicFailoverQuorum } from "../oauth/anthropic-routing";
+import { anthropicRoutingFor, anthropicSessionKeyFromParts } from "../oauth/anthropic-routing";
+import { configuredAnthropicInstance } from "../providers/anthropic-instance";
+import { messagesSelectorTargetsSecondaryInstance, messagesSecondaryInstanceUnavailable } from "./messages-native-selector";
 import { checkRepresentable, unrepresentableMessage } from "../protocols/guard";
 import { requestPathForLane } from "../protocols/path";
 import { resolveApiSurfaceSettings, resolveProtocolSettings } from "../protocols/settings";
 import { markProtocolBlocked, markProtocolEntry } from "../protocols/trace";
 import { recordProtocolShadowPlan } from "../protocols/shadow-plan";
+import { captureAnthropicClientIdentity } from "../adapters/anthropic/client-identity";
 import { nativeMessagesDeclineReason, type NativeMessagesSelector } from "./messages-native-eligibility";
 import {
   isApiAuthRequired,
@@ -139,10 +156,10 @@ function decodeClaudeFastSelector(raw: string, cc?: OcxConfig["claudeCode"]): st
   return decodedBase === bare ? exact : `${decodedBase}--fast`;
 }
 
-/** Restore the reversible Fable picker alias before Anthropic passthrough checks. */
-function decodeFablePickerAlias(raw: string, cc?: OcxConfig["claudeCode"]): string {
+/** Restore reversible native Claude picker aliases before Anthropic passthrough checks. */
+function decodeNativeClaudePickerAlias(raw: string, cc?: OcxConfig["claudeCode"]): string {
   const decoded = resolveInboundModel(raw, cc);
-  if (!decoded.startsWith("claude-fable-")) return raw;
+  if (!decoded.startsWith("claude-")) return raw;
   // A picker value saved before the ocx-claude spelling keeps the native passthrough too.
   return claudeCodeNativeAlias(decoded) === raw || legacyAliasForNative(decoded) === raw ? decoded : raw;
 }
@@ -239,6 +256,7 @@ function wantsNativePassthrough(
 ): model is string {
   if (cc?.nativePassthrough === false) return false;
   if (typeof model !== "string" || !/^(claude|anthropic)/i.test(model)) return false;
+  if (messagesSelectorTargetsSecondaryInstance(config, model, cc)) return false;
   // Authorization and x-api-key both belong to the upstream on this branch. An exposed listener
   // therefore requires the dedicated admission header even though the routed Messages surface
   // keeps accepting all three legacy admission forms.
@@ -296,7 +314,7 @@ export interface PassthroughBodyGuard {
 }
 
 type PassthroughCloseReason = "terminal" | "client_cancel" | "body_stall" | "body_overflow";
-type PassthroughFinalizeMeta = { closeReason: PassthroughCloseReason; terminalStatus?: "failed" };
+type PassthroughFinalizeMeta = { closeReason: PassthroughCloseReason; terminalStatus?: "failed" | "incomplete" };
 
 /**
  * Tap an Anthropic-vocabulary SSE stream for the request log (usage + terminal),
@@ -330,6 +348,7 @@ export function tapAnthropicSseForLog(
     let data: unknown;
     try { data = JSON.parse(dataLine); } catch { return; }
     if (!isRec(data)) return;
+    recordGenerationEvent(logCtx, data.type);
     if (data.type === "message_start" && isRec(data.message) && isRec(data.message.usage)) {
       usageAcc = { ...usageAcc, ...data.message.usage };
     } else if (data.type === "message_delta" && isRec(data.usage)) {
@@ -340,12 +359,28 @@ export function tapAnthropicSseForLog(
   };
   const inspect = (chunk: Uint8Array) => {
     buffer += decoder.decode(chunk, { stream: true });
+    // SSE lines may end in CRLF, LF or CR. Normalize the inspection copy to LF (the forwarded
+    // bytes are untouched), holding a trailing CR until the next chunk shows whether an LF
+    // follows it, so a CRLF split across chunks stays one line ending.
+    const heldCr = buffer.endsWith("\r");
+    buffer = (heldCr ? buffer.slice(0, -1) : buffer).replace(/\r\n?/g, "\n") + (heldCr ? "\r" : "");
     let sep: number;
     while ((sep = buffer.indexOf("\n\n")) !== -1) {
       const frame = buffer.slice(0, sep);
       buffer = buffer.slice(sep + 2);
       inspectFrame(frame);
     }
+  };
+  // The last block can sit in the buffer without its blank line: an upstream that stopped after
+  // it, or a held trailing CR. Count it before deciding how the turn ended (the Responses relay
+  // flushes the same candidate). Returns true when this flush found the terminal in a block the
+  // client has not seen a blank line after, so the caller restores one.
+  const flushTail = (): boolean => {
+    const terminalBefore = terminalSeen;
+    const tail = (buffer + decoder.decode()).replace(/\r\n?/g, "\n");
+    buffer = "";
+    if (tail) inspectFrame(tail);
+    return terminalSeen && !terminalBefore && !tail.endsWith("\n\n");
   };
   const reader = upstream.getReader();
   let settled = false;
@@ -369,9 +404,25 @@ export function tapAnthropicSseForLog(
     settled = true;
     idle.cancel();
     detachAbort();
+    const terminalInTail = flushTail();
     recordUsage();
-    finalize(200, { closeReason });
-    closeWithErrorFrame(errType, message);
+    if (terminalSeen) {
+      // The turn already ended (message_stop or an upstream error event): an upstream that then
+      // idles or keeps sending did not cut it short. Same rule as the read-error branch,
+      // including the restored blank line for a terminal found only in the tail.
+      finalize(200, { closeReason: "terminal" });
+      try {
+        if (terminalInTail) tapController?.enqueue(encoder.encode("\n\n"));
+        tapController?.close();
+      } catch { /* client already torn down */ }
+    } else {
+      // A cut-short turn, logged as the Responses relay logs a stall-timeout incomplete
+      // (httpStatusForRequestLogTerminal: only a max_output_tokens incomplete is a 200). A 200
+      // row with no terminalStatus also lost its failure diagnostics in usage.jsonl.
+      logCtx.upstreamError = message.slice(0, 500);
+      finalize(502, { terminalStatus: "incomplete", closeReason });
+      closeWithErrorFrame(errType, message);
+    }
     reader.cancel(new DOMException(message, closeReason === "body_stall" ? "TimeoutError" : "QuotaExceededError")).catch(() => {});
   };
   const idle = idleDeadline(guard?.stallMs ?? 0, () => {
@@ -450,12 +501,7 @@ export function tapAnthropicSseForLog(
         settled = true;
         idle.cancel();
         detachAbort();
-        // A read error can follow the last SSE block before its blank-line delimiter. Count
-        // that block before deciding how the turn ended, as the Responses relay does.
-        const terminalBeforeTail = terminalSeen;
-        const tail = buffer + decoder.decode();
-        buffer = "";
-        if (tail) inspectFrame(tail);
+        const terminalInTail = flushTail();
         recordUsage();
         if (isTranslatorBudgetExceededError(err)) {
           // A local cap, not an upstream failure: the non-streaming native Messages fold
@@ -471,7 +517,7 @@ export function tapAnthropicSseForLog(
           try {
             // An SSE parser drops an event that EOF cuts off before its blank line, so restore
             // the delimiter when the terminal was only found in that unterminated tail.
-            if (!terminalBeforeTail) controller.enqueue(encoder.encode("\n\n"));
+            if (terminalInTail) controller.enqueue(encoder.encode("\n\n"));
             controller.close();
           } catch { /* torn down */ }
           reader.cancel(err).catch(() => {});
@@ -555,6 +601,14 @@ async function anthropicNativePassthrough(
   logCtx.provider = "anthropic-native";
   logCtx.requestedModel = model;
   const finalize = createFinalRequestLog(logIds, logCtx).finish;
+  // Locally generated diagnostics are fixed text plus validated guard limits. Runtime
+  // fetch errors retain their existing client response but use a fixed stored reason.
+  const fail = (status: number, closeReason: PassthroughCloseReason | "non_stream", message: string, type: string, storedReason = message) => {
+    const safeMessage = redactSecretString(message);
+    logCtx.upstreamError = storedReason.slice(0, 500);
+    finalize(status, { closeReason });
+    return anthropicErrorResponse(status, safeMessage, type);
+  };
 
   const base = (config.claudeCode?.anthropicBaseUrl ?? "https://api.anthropic.com").replace(/\/$/, "");
   const search = new URL(req.url).search;
@@ -581,22 +635,25 @@ async function anthropicNativePassthrough(
     req.signal,
   );
   if (result.kind === "timeout") {
-    finalize(504, { closeReason: "non_stream" });
-    return anthropicErrorResponse(504, "anthropic passthrough timed out waiting for response headers", "timeout_error");
+    return fail(504, "non_stream", "anthropic passthrough timed out waiting for response headers", "timeout_error");
   }
   if (result.kind === "error") {
     const err = result.error;
-    finalize(502, { closeReason: "non_stream" });
-    return anthropicErrorResponse(502, `anthropic passthrough failed: ${err instanceof Error ? err.message : String(err)}`, "api_error");
+    return fail(502, "non_stream", `anthropic passthrough failed: ${err instanceof Error ? err.message : String(err)}`, "api_error", "anthropic passthrough failed: upstream connection error");
   }
   const upstream = result.upstream;
 
   const contentType = upstream.headers.get("content-type") ?? "application/json";
+  const rateLimitHeaders = {
+    ...anthropicRateLimitHeaders(upstream.headers),
+    ...(pathname === "/v1/messages" ? upstreamMessagesRequestIdHeaders(upstream.headers) : {}),
+  };
   const bodyGuard = resolvePassthroughBodyGuard(config, req.signal);
   if (upstream.ok && contentType.includes("text/event-stream") && upstream.body) {
     return new Response(tapAnthropicSseForLog(upstream.body, logCtx, finalize, bodyGuard), {
       status: upstream.status,
       headers: {
+        ...rateLimitHeaders,
         "Content-Type": contentType,
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
@@ -607,16 +664,13 @@ async function anthropicNativePassthrough(
   // idle/size bounds — headers are NOT yet sent here, so real statuses are available.
   const bodyResult = await readBoundedPassthroughBody(upstream, bodyGuard);
   if (bodyResult.kind === "client_cancel") {
-    finalize(499, { closeReason: "client_cancel" });
-    return anthropicErrorResponse(499, "client closed request during anthropic passthrough", "api_error");
+    return fail(499, "client_cancel", "client closed request during anthropic passthrough", "api_error");
   }
   if (bodyResult.kind === "stall") {
-    finalize(504, { closeReason: "body_stall" });
-    return anthropicErrorResponse(504, `anthropic passthrough body stalled: no upstream bytes for ${Math.round(bodyGuard.stallMs / 1000)}s`, "timeout_error");
+    return fail(504, "body_stall", `anthropic passthrough body stalled: no upstream bytes for ${Math.round(bodyGuard.stallMs / 1000)}s`, "timeout_error");
   }
   if (bodyResult.kind === "overflow") {
-    finalize(502, { closeReason: "body_overflow" });
-    return anthropicErrorResponse(502, `anthropic passthrough body exceeded ${bodyGuard.maxBytes} bytes`, "api_error");
+    return fail(502, "body_overflow", `anthropic passthrough body exceeded ${bodyGuard.maxBytes} bytes`, "api_error");
   }
   const text = bodyResult.text;
   if (upstream.ok) {
@@ -624,15 +678,35 @@ async function anthropicNativePassthrough(
       const parsed = JSON.parse(text) as { usage?: Rec };
       if (isRec(parsed?.usage)) logCtx.usage = anthropicUsageToOcx(parsed.usage);
     } catch { /* count_tokens etc. */ }
+  } else if (upstream.status >= 400) {
+    // Upstream text is untrusted: retain only a closed type vocabulary in history.
+    // Bound parsing work independently of the larger response-relay body limit.
+    const statusReason = `Provider error ${upstream.status}`;
+    logCtx.upstreamError = statusReason;
+    if (text.length <= PASSTHROUGH_ERROR_DETAIL_MAX_CHARS) {
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (isRec(parsed) && parsed.type === "error" && isRec(parsed.error)) {
+          const upstreamType = parsed.error.type;
+          const knownType = PASSTHROUGH_ERROR_TYPES.find(type => type === upstreamType);
+          if (knownType) logCtx.upstreamError = `${statusReason}: ${knownType}`;
+        }
+      } catch { /* Malformed errors keep the fixed status-only diagnostic. */ }
+    }
   }
   finalize(upstream.status, { closeReason: "non_stream" });
   const retryAfter = upstream.headers.get("retry-after");
   return new Response(text, {
     status: upstream.status,
-    headers: { "Content-Type": contentType, ...(retryAfter ? { "Retry-After": retryAfter } : {}) },
+    headers: { ...rateLimitHeaders, "Content-Type": contentType, ...(retryAfter ? { "Retry-After": retryAfter } : {}) },
   });
 }
 
+const PASSTHROUGH_ERROR_TYPES = [
+  "invalid_request_error", "authentication_error", "permission_error", "not_found_error",
+  "rate_limit_error", "api_error", "overloaded_error", "request_too_large",
+] as const;
+const PASSTHROUGH_ERROR_DETAIL_MAX_CHARS = 64 * 1024;
 const DEFAULT_BODY_STALL_SEC = 90;
 const DEFAULT_BODY_MAX_BYTES = 64 * 1024 * 1024;
 
@@ -776,11 +850,27 @@ export async function handleClaudeMessages(
     return finalizeTranslatorBudgetResponse(
       await handleClaudeMessagesWithBudget(req, config, logCtx, translatorBudget, logIds, requestPolicy, ingress),
       translatorBudget,
+      req.signal,
     );
   } catch (error) {
     translatorBudget.dispose();
     throw error;
   }
+}
+
+/** The client answer for a Messages body the translation (or the direct decode) refused. */
+function translationFailure(err: unknown, logCtx: RequestLogContext, logIds: { requestId: string; start: number } | undefined): Response {
+  const overflow = isTranslatorBudgetExceededError(err);
+  const unavailable = err instanceof DesktopModelMappingUnavailableError;
+  const status = overflow ? 413 : unavailable ? 503 : err instanceof AnthropicRequestError ? 400 : 500;
+  if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, status, { closeReason: "non_stream" });
+  if (unavailable) return desktopMappingUnavailableResponse(err);
+  return anthropicErrorResponse(
+    status,
+    overflow ? "request translation buffer exceeded the safe limit" : err instanceof Error ? err.message : String(err),
+    overflow ? "request_too_large" : undefined,
+    overflow ? "translation_buffer_limit" : undefined,
+  );
 }
 
 /**
@@ -811,10 +901,18 @@ async function handleClaudeMessagesWithBudget(
   let anthropicBody: unknown;
   let internalBody: Rec;
   let cacheKeySource: ClaudeCacheKeySource = null;
+  let nativeReasoningReplay: ReadonlyMap<string, string> | undefined;
+  const nativeReasoningMint: { owner?: NativeReasoningOwner } = {};
+  let nativeProjectionOnlyError: AnthropicRequestError | undefined;
   let effortOverride: string | null = null;
   let effortRow: ParsedEffortRowId | null = null;
   let fastRow: ParsedFastRowId | null = null;
   let requestedModel = "";
+  // Antigravity direct lane (off by default): planned before translation, kept only if routing
+  // settles on the route the plan was made for.
+  let directPlan: MessagesDirectPlan | undefined;
+  /** The retained charge for the settings-only body, handed back if the plan is left. */
+  let directSettingsBodyBytes = 0;
   // Built only under the reject policy; the legacy default leaves this request untouched.
   let envelope: ProtocolEnvelope | undefined;
   let messagesFeatures: () => Iterable<ProtocolFeature> = () => [];
@@ -838,7 +936,7 @@ async function handleClaudeMessagesWithBudget(
       }
     }
     if (isRec(anthropicBody) && typeof anthropicBody.model === "string") {
-      anthropicBody.model = decodeFablePickerAlias(anthropicBody.model, cc);
+      anthropicBody.model = decodeNativeClaudePickerAlias(anthropicBody.model, cc);
     }
     if (isRec(anthropicBody) && typeof anthropicBody.model === "string") {
       requestedModel = anthropicBody.model;
@@ -868,8 +966,10 @@ async function handleClaudeMessagesWithBudget(
       req.headers.get("anthropic-beta") ?? undefined,
     );
     // Client surface discrimination: Desktop 3P aliases resolve through the
-    // desktop registry; Code uses readable aliases or direct model names.
-    if (isRec(anthropicBody) && typeof anthropicBody.model === "string" && resolveDesktop3pAlias(anthropicBody.model)) {
+    // desktop registry; Code uses readable aliases or direct model names. The CLI's first-party
+    // picker also offers registry aliases, so a CLI-classified User-Agent stays the Code surface.
+    if (isRec(anthropicBody) && typeof anthropicBody.model === "string" && resolveDesktop3pAlias(anthropicBody.model)
+      && classifyInterceptClient(req.headers.get("user-agent")) !== "cli") {
       logCtx.surface = "claude-desktop";
       recordDesktopRequest();
     }
@@ -899,7 +999,20 @@ async function handleClaudeMessagesWithBudget(
     if (!effortRow && !fastRow && isRec(anthropicBody) && wantsNativePassthrough(req, config, requestPolicy, anthropicBody.model, cc)) {
       markProtocolEntry(logCtx, { inbound: "messages", lane: "native", features: messagesFeatures });
       recordProtocolShadowPlan(logCtx, config, { inbound: "messages", model: requestedModel });
-      return await anthropicNativePassthrough(req, config, logCtx, logIds, anthropicBody, "/v1/messages");
+      let projectedBody: Rec;
+      try {
+        projectedBody = nativeAnthropicProjection(anthropicBody, translatorBudget);
+      } catch (err) {
+        if (!isTranslatorBudgetExceededError(err)) throw err;
+        if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, 413, { closeReason: "non_stream" });
+        return anthropicErrorResponse(413, "request translation buffer exceeded the safe limit", "request_too_large", "translation_buffer_limit");
+      }
+      return await anthropicNativePassthrough(req, config, logCtx, logIds, projectedBody, "/v1/messages");
+    }
+    if (isRec(anthropicBody) && typeof anthropicBody.model === "string"
+      && messagesSecondaryInstanceUnavailable(config, anthropicBody.model, cc)) {
+      if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, 401, { closeReason: "non_stream" });
+      return anthropicErrorResponse(401, "Configured Anthropic OAuth instance is unavailable", "authentication_error");
     }
     // Only Anthropic holds message-thread state; the error makes Claude Code resend the full turn.
     if (carriesMessageThread(anthropicBody)) {
@@ -949,26 +1062,38 @@ async function handleClaudeMessagesWithBudget(
       };
       delete anthropicBody.thinking;
     }
-    const translation = messagesToResponsesTranslation(anthropicBody, cc, translatorBudget);
+    // On the direct lane the core receives only the request settings; the conversation is
+    // already decoded into the IR. Without a plan the translation below runs as before.
+    directPlan = planMessagesAntigravityDirect(anthropicBody, cc, config, translatorBudget);
+    let translation = directPlan && {
+      body: directPlan.settingsBody,
+      cacheKeySource: directPlan.cacheKeySource,
+      nativeReasoningReplay: directPlan.conversation.nativeReasoningReplay,
+    };
+    try {
+      translation ??= messagesToResponsesTranslation(anthropicBody, cc, translatorBudget);
+    } catch (err) {
+      // A native Messages route can discard an undecodable proxy envelope. Keep the
+      // original error for any route that ultimately translates to Responses.
+      if (!(err instanceof AnthropicRequestError) || err.message !== "malformed ocxr1 reasoning signature"
+        || !isRec(anthropicBody)) throw err;
+      const projected = nativeAnthropicProjection(anthropicBody, translatorBudget);
+      if (projected === anthropicBody) throw err;
+      translation = messagesToResponsesTranslation(projected, cc, translatorBudget);
+      nativeProjectionOnlyError = err;
+    }
     internalBody = translation.body;
     // The Anthropic translator builds its body from model/input/store/stream plus sampling
     // fields only, so the caller intent is applied to the TRANSLATED body rather than the
     // inbound one.
     if (fastRow) internalBody.service_tier = "priority";
-    translatorBudget.chargeRetained(jsonUtf8Bytes(internalBody), { kind: "request_copies" });
+    const internalBodyBytes = jsonUtf8Bytes(internalBody);
+    translatorBudget.chargeRetained(internalBodyBytes, { kind: "request_copies" });
+    if (directPlan) directSettingsBodyBytes = internalBodyBytes;
     cacheKeySource = translation.cacheKeySource;
+    nativeReasoningReplay = translation.nativeReasoningReplay;
   } catch (err) {
-    const overflow = isTranslatorBudgetExceededError(err);
-    const unavailable = err instanceof DesktopModelMappingUnavailableError;
-    const status = overflow ? 413 : unavailable ? 503 : err instanceof AnthropicRequestError ? 400 : 500;
-    if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, status, { closeReason: "non_stream" });
-    if (unavailable) return desktopMappingUnavailableResponse(err);
-    return anthropicErrorResponse(
-      status,
-      overflow ? "request translation buffer exceeded the safe limit" : err instanceof Error ? err.message : String(err),
-      overflow ? "request_too_large" : undefined,
-      overflow ? "translation_buffer_limit" : undefined,
-    );
+    return translationFailure(err, logCtx, logIds);
   }
 
   if (!requestedModel) requestedModel = (anthropicBody as Rec).model as string;
@@ -1021,23 +1146,49 @@ async function handleClaudeMessagesWithBudget(
     }
     return requestTokenFloor;
   };
+  /** Leave the direct plan: the core gets the full bridge translation, as without the switch. */
+  const leaveDirectPlan = (): unknown => {
+    // Hand back everything the plan retained: its decode and the settings-only body it replaces.
+    directPlan?.releaseDecodeCharges();
+    directPlan = undefined;
+    nativeReasoningReplay = undefined;
+    translatorBudget.releaseRetained(directSettingsBodyBytes, { kind: "request_copies" });
+    directSettingsBodyBytes = 0;
+    try {
+      const translation = messagesToResponsesTranslation(anthropicBody, cc, translatorBudget);
+      internalBody = translation.body;
+      if (fastRow) internalBody.service_tier = "priority";
+      internalBody.stream = true;
+      translatorBudget.chargeRetained(jsonUtf8Bytes(internalBody), { kind: "request_copies" });
+      cacheKeySource = translation.cacheKeySource;
+      nativeReasoningReplay = translation.nativeReasoningReplay;
+      return undefined;
+    } catch (err) {
+      return err;
+    }
+  };
+  let directLeaveError: unknown;
   try {
-    const route = routeModel(config, internalBody.model as string, evidenceFromBody(internalBody));
-    // Same reason as the native Chat lane: this route can be sent from here, so
-    // the key's scope is applied before the wire is settled.
-    assertRouteAllowedByScope(
-      resolveAdmissionModelScope(config, logIds?.admission),
-      String(internalBody.model ?? ""),
-      route,
-    );
+    const route = routeModel(config, internalBody.model as string, directPlan ? directPlan.evidence : evidenceFromBody(internalBody));
     // Settle the wire once so the sampling decision below reads the effective
     // adapter rather than the provider-wide default (#404).
     route.staticPolicy = captureRouteStaticPolicy(
       route.providerName, route.modelId, route.provider, route.staticPolicy.effectiveAlias, "anthropic",
     );
+    // Keep native dispatch scoped while translated xAI OAuth requests preview
+    // the same billed Fast lane as their final Responses scope check.
+    assertRouteAllowedByScope(
+      resolveAdmissionModelScope(config, logIds?.admission),
+      String(internalBody.model ?? ""),
+      { providerName: route.providerName, modelId: previewXaiOauthWireModel({ options: {
+        serviceTier: typeof internalBody.service_tier === "string" ? internalBody.service_tier : undefined,
+      } }, route, config, "anthropic") },
+    );
     route.provider = resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, "anthropic", route.staticPolicy);
     logCtx.routeDecision = route.routeDecision;
     settledRoute = route;
+    // Before any route-specific shaping, so a request that leaves the lane is shaped as the bridge's.
+    if (directPlan && !messagesDirectPlanHolds(directPlan, route, anthropicBody as Rec, config)) directLeaveError = leaveDirectPlan();
     if (directEncodersApply(config, route)) {
       clientEncoder = { protocol: "messages", stream, model: requestedModel, inputTokenFloor: claudeRequestTokenFloor() };
     }
@@ -1083,24 +1234,51 @@ async function handleClaudeMessagesWithBudget(
     }
     /* unknown model: let handleResponses shape the 404 */
   }
+  if (directPlan && !settledRoute) directLeaveError ??= leaveDirectPlan();
+  if (directLeaveError !== undefined) return translationFailure(directLeaveError, logCtx, logIds);
+  const directRoute = directPlan && settledRoute ? settledRoute : undefined;
+  // The direct lane answers through the direct encoder whatever `directEncoders` says: neither
+  // direction passes through the internal Responses body.
+  if (directRoute) {
+    clientEncoder = { protocol: "messages", stream, model: requestedModel, inputTokenFloor: claudeRequestTokenFloor(), requestLane: "direct" };
+  }
 
   // PF-08: a managed-key Anthropic route sends its Messages body natively. The caller-forward
   // passthrough above was decided on the caller's own credential and never reaches this point.
+  const settledInstance = configuredAnthropicInstance(config, settledRoute?.providerName);
+  if (settledRoute?.providerName === "anthropic2" && settledRoute.provider.authMode === "oauth" && !settledInstance) {
+    if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, 401, { closeReason: "non_stream" });
+    return anthropicErrorResponse(401, "Configured Anthropic OAuth instance is unavailable", "authentication_error");
+  }
   const nativeSelector: NativeMessagesSelector = {
     effortRow: !!effortRow, fastRow: !!fastRow, routeSelector: String(internalBody.model ?? ""), claudeCode: cc,
     // PF-10: a stored second OAuth account turns on the bridge's rotation, so it stays there.
-    ...(settledRoute?.provider.authMode === "oauth" ? { oauthFailoverQuorum: hasAnthropicFailoverQuorum() } : {}),
+    ...(settledRoute?.provider.authMode === "oauth" && settledInstance
+      ? { oauthFailoverQuorum: anthropicRoutingFor(settledInstance).hasAnthropicFailoverQuorum() } : {}),
   };
   const nativeDecline = settledRoute && isRec(anthropicBody)
     ? nativeMessagesDeclineReason(settledRoute, anthropicBody, config, nativeSelector)
     : "rollout-disabled";
   const nativeMessagesRoute = settledRoute && nativeDecline === undefined ? settledRoute : undefined;
+  if (nativeProjectionOnlyError && !nativeMessagesRoute) {
+    if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, 400, { closeReason: "non_stream" });
+    return anthropicErrorResponse(400, nativeProjectionOnlyError.message, "invalid_request_error");
+  }
   // With the switch on, a declined route says why on its bridge mark, as native Chat does.
-  if (nativeDecline && nativeDecline !== "rollout-disabled") {
+  const antigravityDecline = settledRoute && !nativeMessagesRoute && !directRoute
+    ? messagesDirectTraceDecline(settledRoute, anthropicBody, String(internalBody.model ?? ""), config)
+    : undefined;
+  if (directRoute) {
+    markProtocolEntry(logCtx, { inbound: "messages", lane: "direct", features: messagesFeatures });
+  } else if ((nativeDecline && nativeDecline !== "rollout-disabled") || antigravityDecline) {
     markProtocolEntry(logCtx, {
       inbound: "messages",
       lane: "bridge",
-      reasonCodes: [...(effortRow ? ["effort-row" as const] : fastRow ? ["fast-row" as const] : []), nativeDecline],
+      reasonCodes: [
+        ...(effortRow ? ["effort-row" as const] : fastRow ? ["fast-row" as const] : []),
+        ...(nativeDecline && nativeDecline !== "rollout-disabled" ? [nativeDecline] : []),
+        ...(antigravityDecline ? [antigravityDecline] : []),
+      ],
       features: messagesFeatures,
     });
   }
@@ -1108,7 +1286,11 @@ async function handleClaudeMessagesWithBudget(
   if (envelope && settledRoute && !settledRoute.combo && settledRoute.routeKind !== "policy") {
     const verdict = checkRepresentable({
       inbound: "messages",
-      requestPath: requestPathForLane("messages", nativeMessagesRoute ? "native" : "bridge", upstreamWireForAdapter(settledRoute.provider.adapter)),
+      requestPath: requestPathForLane(
+        "messages",
+        nativeMessagesRoute ? "native" : directRoute ? "direct" : "bridge",
+        upstreamWireForAdapter(settledRoute.provider.adapter),
+      ),
       features: envelope.features(),
       policy: "reject",
     });
@@ -1133,7 +1315,7 @@ async function handleClaudeMessagesWithBudget(
     let nativeBody: Rec;
     try {
       // Built from the source envelope when there is one, after the managed-client steps above.
-      nativeBody = envelope ? envelope.freshBody() : anthropicBody as Rec;
+      nativeBody = nativeAnthropicProjection(envelope ? envelope.freshBody() : anthropicBody as Rec, translatorBudget);
     } catch (err) {
       if (!isTranslatorBudgetExceededError(err)) throw err;
       if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, 413, { closeReason: "non_stream" });
@@ -1143,8 +1325,17 @@ async function handleClaudeMessagesWithBudget(
     return await handleNativeMessages({
       req, config, logCtx, ...(logIds ? { logIds } : {}),
       route: nativeMessagesRoute, body: nativeBody, requestedModel, translatorBudget, selector: nativeSelector,
-      // The one caller header the native lane is given; the builder allowlists it.
+      modelScope: resolveAdmissionModelScope(config, logIds?.admission),
+      // Compatibility identity is an opaque request-local handle, separate from credentials.
+      clientIdentity: captureAnthropicClientIdentity(req.headers),
       callerAnthropicBeta: req.headers.get("anthropic-beta"),
+      sessionKey: anthropicSessionKeyFromParts({
+        sessionIdHeader: req.headers.get("session_id")?.trim() || req.headers.get("x-claude-code-session-id"),
+        threadIdHeader: req.headers.get("thread_id"),
+        clientThreadId: conversationIdFromClaudeMetadata(isRec(nativeBody.metadata) ? nativeBody.metadata : undefined),
+        promptCacheKey: typeof internalBody.prompt_cache_key === "string" ? internalBody.prompt_cache_key : null,
+        promptCacheKeyIsSharedCohort: cacheKeySource === "system",
+      }),
     });
   }
 
@@ -1229,6 +1420,14 @@ async function handleClaudeMessagesWithBudget(
     // Without this the replay would look native and a Responses-scoped wire default
     // would fire, disagreeing with the pre-flight decision above.
     inboundWire: "anthropic",
+    // An explicit empty `tools` array is a deny-all declaration the translation drops with
+    // the rest of the catalog; carried separately so the undeclared-tool guard can still
+    // enforce it while partial and absent catalogs stay deferred.
+    clientDeclaredEmptyToolCatalog: isRec(anthropicBody)
+      && Array.isArray(anthropicBody.tools)
+      && anthropicBody.tools.length === 0,
+    nativeReasoningReplay,
+    nativeReasoningMint,
     claudeGoAffinity: { sessionLane: claudeGoSessionLane },
     claudeNativeSessionId,
     stripClaudeMainAuthForNoncanonicalForward: true,
@@ -1241,6 +1440,9 @@ async function handleClaudeMessagesWithBudget(
     onNativePassthroughTerminal: status => finalizeNativeLog(httpStatusForRequestLogTerminal(status, logCtx), { terminalStatus: status, closeReason: "terminal" }),
     onNativePassthroughCancel: () => finalizeNativeLog(499, { closeReason: "client_cancel" }),
     ...(clientEncoder ? { clientEncoder } : {}),
+    ...(directRoute && directPlan
+      ? { directRequest: messagesDirectRequestOption(directPlan, anthropicBody, cc, translatorBudget) }
+      : {}),
   });
   const response = logIds ? responseWithDeferredRequestLog(upstream, logIds.requestId, logIds.start, logCtx) : upstream;
   // Already in the Messages wire (direct encoder): no conversion.
@@ -1252,10 +1454,14 @@ async function handleClaudeMessagesWithBudget(
     const replayRefusal = isReplayRefusalResponse(response);
     // Re-shape the OpenAI-style error envelope into the Anthropic one, preserving status.
     let message = `upstream error (${response.status})`;
+    let contextError = false;
+    let catalogRefusal = false;
     try {
       const text = await response.text();
       try {
-        const parsed = JSON.parse(text) as { error?: { message?: string; type?: string } | string; message?: string };
+        const parsed = JSON.parse(text) as { error?: { message?: string; type?: string; code?: unknown } | string; message?: string };
+        contextError = typeof parsed?.error === "object" && parsed.error?.code === "context_length_exceeded";
+        catalogRefusal = typeof parsed?.error === "object" && parsed.error?.code === UNDECLARED_TOOL_CALL_ERROR_CODE;
         const nested = typeof parsed?.error === "object" && parsed.error ? parsed.error.message : undefined;
         const flat = typeof parsed?.error === "string" ? parsed.error : parsed?.message;
         message = nested || flat || (text ? `upstream error (${response.status}): ${text.slice(0, 400)}` : message);
@@ -1264,7 +1470,7 @@ async function handleClaudeMessagesWithBudget(
       }
     } catch { /* keep fallback message */ }
     const upstreamRetryAfter = response.headers.get("retry-after");
-    const retryAfter = replayRefusal
+    const retryAfter = replayRefusal || contextError
       ? undefined
       : resolveClientRetryAfter({
           status: response.status,
@@ -1284,10 +1490,13 @@ async function handleClaudeMessagesWithBudget(
     const nativeMainFence = response.status === 503
       && upstreamRetryAfter?.trim() === "1"
       && message === CODEX_MAIN_PROFILE_MAINTENANCE_MESSAGE;
-    const transient = !replayRefusal && !nativeMainFence && isTransientUpstreamStatus(response.status);
+    // The undeclared-tool guard's refusal is deterministic: the same request produces the
+    // same verdict, so it must not arrive as a retryable overload like a transient 5xx.
+    const transient = !replayRefusal && !nativeMainFence && !contextError && !catalogRefusal
+      && isTransientUpstreamStatus(response.status);
     const outStatus = replayRefusal
       ? REPLAY_REFUSED_STATUS
-      : nativeMainFence ? 503 : transient ? 529 : response.status;
+      : nativeMainFence ? 503 : contextError ? 400 : transient ? 529 : response.status;
     const outHeaders = new Headers({ "Content-Type": "application/json" });
     if (retryAfter) outHeaders.set("Retry-After", retryAfter);
     else if (transient) outHeaders.set("Retry-After", "2");
@@ -1296,7 +1505,11 @@ async function handleClaudeMessagesWithBudget(
       outStatus,
       message,
       undefined,
-      replayRefusal ? UPSTREAM_RESET_REPLAY_REFUSED_CODE : undefined,
+      replayRefusal
+        ? UPSTREAM_RESET_REPLAY_REFUSED_CODE
+        : contextError
+          ? "context_length_exceeded"
+          : catalogRefusal ? UNDECLARED_TOOL_CALL_ERROR_CODE : undefined,
     )), {
       status: outStatus,
       headers: outHeaders,
@@ -1308,6 +1521,7 @@ async function handleClaudeMessagesWithBudget(
   if (contentType.includes("text/event-stream") && response.body) {
     const anthropicSse = responsesSseToAnthropicSse(response.body, requestedModel, {
       translatorBudget,
+      nativeReasoningTagFor: blob => nativeReasoningTag(nativeReasoningMint.owner, blob),
       // Only a floor, and only for the first frame: an upstream that reports usage early wins
       // over it inside the translator, and the terminal `message_delta` carries the
       // authoritative count either way (#4857).
@@ -1347,7 +1561,7 @@ async function handleClaudeMessagesWithBudget(
       );
     }
     return new Response(JSON.stringify(message), {
-      status: isError ? 502 : 200,
+      status: isError ? (translatedError?.code === "context_length_exceeded" ? 400 : 502) : 200,
       headers: { "Content-Type": "application/json" },
     });
   }
@@ -1370,11 +1584,14 @@ async function handleClaudeMessagesWithBudget(
         "translation_buffer_limit",
       );
     }
+    if (error?.code === "context_length_exceeded") {
+      return anthropicErrorResponse(400, error.message ?? "upstream context limit exceeded", "invalid_request_error", error.code);
+    }
     return anthropicErrorResponse(502, error?.message ?? "upstream request failed", "api_error");
   }
   let message: Rec;
   try {
-    message = responsesJsonToAnthropicMessage(json, requestedModel, translatorBudget);
+    message = responsesJsonToAnthropicMessage(json, requestedModel, translatorBudget, blob => nativeReasoningTag(nativeReasoningMint.owner, blob));
   } catch (err) {
     if (!isTranslatorBudgetExceededError(err)) throw err;
     return anthropicErrorResponse(413, "upstream translation buffer exceeded the safe limit", "request_too_large", "translation_buffer_limit");
@@ -1598,7 +1815,7 @@ export async function handleClaudeCountTokens(
       model = stripOneMillionMarker(countRoute);
       raw.model = model;
     }
-    model = decodeFablePickerAlias(model, cc);
+    model = decodeNativeClaudePickerAlias(model, cc);
     raw.model = model;
     // Fast-only: count_tokens never parsed an effort row, so it must not start. It returns a
     // token estimate and sends no tier, so only the IDENTITY is corrected - without this the
@@ -1617,9 +1834,9 @@ export async function handleClaudeCountTokens(
     // A thread delta would undercount; refuse it exactly as the translated Messages path does.
     if (carriesMessageThread(raw)) return messageThreadUnsupportedResponse();
     // PF-08: an eligible managed-key route counts the body the native lane would send.
-    const nativeCountBody = resolveProtocolSettings(config).rollout.managedMessagesNative
-      ? (await import("./messages-native")).nativeMessagesCountBody(config, cc, raw, { fastRow: countFastRow !== null })
-      : undefined;
+    const nativeCountBody = (await import("./messages-native")).nativeMessagesCountBody(
+      config, cc, raw, { fastRow: countFastRow !== null }, captureAnthropicClientIdentity(req.headers),
+    );
     // A count answers for the prompt a real turn from this model would forward, so it projects
     // the same unserialized content that turn's `message_start` floor does. Counting the raw
     // caller body instead reported replayed thinking this route never sends (#4857 family).

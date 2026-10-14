@@ -1,5 +1,10 @@
 mod auth;
 mod claim;
+mod cli_command;
+#[cfg(unix)]
+mod cli_command_posix;
+mod cli_command_record;
+mod cli_command_windows;
 #[cfg(target_os = "macos")]
 mod companion_query;
 mod companion_usage;
@@ -9,6 +14,12 @@ mod first_run;
 mod formatting;
 mod identity;
 mod logging;
+mod login_autostart;
+// The judgment is portable so Linux CI runs its fixture parity tests; only macOS reads launchd.
+#[cfg(any(target_os = "macos", test))]
+mod login_registration;
+#[cfg(any(target_os = "windows", test))]
+mod windows_autostart_command;
 // macOS only: it exists to replace one item in a menu no other platform installs. Compiling it
 // elsewhere would leave its contents unreachable, which -D warnings rejects.
 #[cfg(target_os = "macos")]
@@ -27,6 +38,8 @@ mod popup;
 mod popup;
 #[cfg(target_os = "macos")]
 mod provider_icons;
+#[cfg(target_os = "macos")]
+mod tray_login;
 // The macOS build selects native_tray.rs as the popup module; compile the portable popup
 // module's tests on macOS too so its navigation rules run on the maintainers' platform.
 #[cfg(all(test, target_os = "macos"))]
@@ -211,6 +224,43 @@ fn decide_takeover(app: tauri::AppHandle, approved: bool) {
 }
 
 #[tauri::command]
+fn cli_status(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<cli_command::Status, String> {
+    window::require_cli_page(&window)?;
+    Ok(cli_command::status(&app))
+}
+
+#[tauri::command]
+async fn cli_set_enabled(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    enabled: bool,
+) -> Result<cli_command::Status, String> {
+    window::require_cli_page(&window)?;
+    cli_command::set_enabled(app, enabled).await
+}
+
+#[tauri::command]
+async fn cli_install(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<cli_command::Status, String> {
+    window::require_cli_page(&window)?;
+    cli_command::install(app).await
+}
+
+#[tauri::command]
+async fn cli_remove(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+) -> Result<cli_command::Status, String> {
+    window::require_cli_page(&window)?;
+    cli_command::remove(app).await
+}
+
+#[tauri::command]
 async fn update_status(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
@@ -244,7 +294,7 @@ async fn update_install(
 
 #[tauri::command]
 fn return_to_dashboard(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
-    window::require_update_page(&window)?;
+    window::require_local_settings_page(&window)?;
     startup::return_to_dashboard(&app)
 }
 
@@ -254,7 +304,14 @@ pub fn run() {
             popup::hide(app);
             startup::open_dashboard(app);
         }))
-        .plugin(tauri_plugin_opener::init())
+        // Links are opened by the webviews' own new-window handler (`window.rs`), not by the
+        // plugin's injected click interceptor, which calls an IPC command the loopback dashboard
+        // is not granted and so swallowed every `target="_blank"` click.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_process::init())
         // The argument is what makes a login launch recognisable. Nothing else in a bare launch
         // distinguishes it from a person opening the app, and D7 needs the difference.
@@ -281,6 +338,10 @@ pub fn run() {
             startup_phases,
             retry_startup,
             decide_takeover,
+            cli_status,
+            cli_set_enabled,
+            cli_install,
+            cli_remove,
             update_status,
             update_check,
             update_install,
@@ -288,6 +349,7 @@ pub fn run() {
         ])
         .setup(|app| {
             app.manage(AppState::new());
+            app.manage(cli_command::State::default());
             app.manage(updater::PendingUpdate(Mutex::new(None)));
             app.manage(updater::DesktopUpdateState::new(
                 app.package_info().version.to_string(),
@@ -316,6 +378,7 @@ pub fn run() {
                     // to the loopback dashboard by `capabilities/dashboard-zoom.json`.
                     .zoom_hotkeys_enabled(true)
                     .on_navigation(window::navigation_allowed(app.handle().clone()))
+                    .on_new_window(window::open_new_windows_in_default_browser())
                     // A hidden window still loads pages: wry builds this one with WebView2
                     // IsVisible=false, and the bootstrap page navigates to the dashboard URL
                     // afterwards, so the eval that a later show or hide would rely on has nowhere

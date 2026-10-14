@@ -1,5 +1,7 @@
 # Kiro Provider
 
+Kiro retry permits retain their [physical executor span](../transports/responses-spend.md#historical-pool-continuity-and-rollback) through credential selection and rebuild. A newly selected identity needs its own normal-capacity seed before inference I/O; a refused permit leaves the executor untouched.
+
 Native steering follows [the shared WebSocket contract](../transports/streaming-health.md#experimental-native-mid-turn-steering); this surface's defaults remain unchanged.
 
 The configuration-only [plaintext V2 contract](../subagents.md#plaintext-v2-agent-messages)
@@ -15,7 +17,7 @@ It uses fixed Kiro authorization hosts, guarded outbound POSTs, and a bounded pr
 flow table. A flow ID is returned only at start; status and cancellation require that ID and
 the same management principal kind. Polling follows the server's interval, and only an exact
 approval shape reaches the protected OAuth store. Device codes and tokens never enter
-management responses. Native slots carry `loginOrigin: "kiro-device"`; kiro-cli reauth
+management responses. Social polling accepts `authorized` and the legacy `approved` alias, with the same token and profile checks. Native slots carry `loginOrigin: "kiro-device"`; kiro-cli reauth
 refuses them before starting CLI work. Upstream verification URLs require HTTPS, no credentials
 or control characters, and a 2048-character limit; user codes use 4–32 plain alphanumeric or
 hyphen characters. Completed flow results are consumed once, terminal entries expire after
@@ -121,6 +123,18 @@ raw body.
 > Decision record: [ADR-0061](../decisions/ADR-0061-kiro-responses-text-controls.md)
 
 ## Bounded fallback HTTP errors
+
+Tool-enabled turns in `src/adapters/kiro/stream.ts` hold ordinary text through the one
+bounded completion retry. A valid private final answer or accepted retry text supersedes
+first-attempt prose, so the client receives one final answer. A real tool call releases
+held progress as commentary before the tool; failed validation also releases progress
+and preserves the non-retryable boundary. Held events stay charged to the translator
+budget until emitted, discarded, or cancelled; replay collectors are released after
+retry construction. Native `END_TURN` and `STOP_SEQUENCE` alone do not distinguish
+progress from an answer and therefore still require validation. Normal private completion
+and real tool calls need no completion retry.
+Coverage: `tests/providers/kiro/kiro-single-final.test.ts` and
+`tests/server/server-kiro-completion-e2e.test.ts`.
 
 `src/adapters/kiro-retry.ts` uses the configured executor for every generation send and may try the existing `q.{region}.amazonaws.com` host once after a canonical-host HTTP 502/503/504 before output, subject to the same send budget. Reset, 429, alternate, and completion-fallback sends wait for a pacing slot; only the first send is pre-paid. Kiro web-search turns are paced as well. A Kiro-local wrapper maps its header deadline to HTTP 504 without changing shared or Google fetch behavior; caller cancellation remains an abort. Final HTTP 5xx text is fixed for clients, and opt-in provider diagnostics carry only closed-set status and classification codes.
 

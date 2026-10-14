@@ -151,10 +151,6 @@ opencodex 还能为 Codex 认证管理一个 **ChatGPT 账户池**。添加多�
 <td>感谢 <a href="https://www.orcarouter.ai/?utm_source=opencodex&utm_medium=readme">OrcaRouter</a> 赞助本项目！OrcaRouter 是面向生产环境的 OpenAI 兼容 AI 网关：自适应路由会给每条提示打分，并把它送到达到你门槛的模型，自动故障转移，路由规则即代码，零加价的提供商定价并支持提示缓存，以及护栏、代理防火墙和每次调用的请求日志，覆盖 200+ 模型。在添加提供商选择器中选择 <code>OrcaRouter</code>，或运行 <code>ocx provider add orcarouter</code>；<code>orcarouter/auto</code> 是自适应路由器。</td>
 </tr>
 <tr>
-<td width="180"><a href="https://www.packyapi.com/register?aff=k5KT"><img src="../assets/sponsors/packycode.png" alt="PackyCode" width="150"></a></td>
-<td>感谢 <a href="https://www.packyapi.com/register?aff=k5KT">PackyCode</a> 赞助本项目！PackyCode 是一家稳定、高性能的 API 中转提供商，为 Claude Code、Codex、Gemini 等提供中转服务。凭借自动故障转移、智能路由和无限并发，它让 AI 成为真正的生产力工具。<a href="https://www.packyapi.com/register?aff=k5KT">通过此链接注册</a>并开始使用！在添加提供商选择器中选择 <code>PackyCode</code>，或运行 <code>ocx provider add packycode</code>。<br><sub>PackyCode 是一家稳定、高效的 API 中转服务商，提供 Claude Code、Codex、Gemini 等多种中转服务。具备自动故障转移、智能路由和无限并发等多种功能，让 AI 编程成为真正的生产力工具。<a href="https://www.packyapi.com/register?aff=k5KT">点此链接注册</a>，立即开始使用！</sub></td>
-</tr>
-<tr>
 <td width="180"><a href="https://tokenlab.sh/r/OPENCODEX"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/sponsors/tokenlab-dark.png"><img src="../assets/sponsors/tokenlab-light.png" alt="TokenLab" width="150"></picture></a></td>
 <td>感谢 <a href="https://tokenlab.sh/r/OPENCODEX">TokenLab</a> 赞助本项目！TokenLab 为编程智能体提供统一的多模型 API，一枚 API Key 即可接入主流模型，支持 OpenAI Responses、Chat Completions、Anthropic Messages 和 Gemini 原生 API 格式，以及流式输出和工具调用。同时提供 MCP 服务器和 Agent Skills，方便接入现有工作流；交付模式可选，按量付费。在添加提供商选择器中选择 <code>TokenLab</code>，或运行 <code>ocx provider add tokenlab</code>。</td>
 </tr>
@@ -310,7 +306,7 @@ OpenCodex 在下列类别中跟踪进程保留状态。每一类都有文档化�
   不会被逐出。
 - **4 个观测缓冲区**（翻译累加器、图片/OAuth/Grok 尾部）会监测飞行中的字节压力，
   但不做逐出。
-- **28 个状态存储注册** 负责过期扫描（60 秒间隔）和配置世代对账，从而移除过期的
+- **31 个状态存储注册** 负责过期扫描（60 秒间隔）和配置世代对账，从而移除过期的
   提供商/账户键。
 - **路径与指纹备忘**（工作区元数据、加固身份、安装盐、模式提示能力）使用按插入顺序的
   LRU 上限（8–128 条）。
@@ -348,12 +344,16 @@ JEV 只用于 `jev-auto`，且每次逻辑模型调用只咨询一次。缺少�
 （fail-open）到当前第一个可用目标；调用方取消仍会取消请求。自动化测试使用模拟的 TypeSafe 端点，
 不验证真实的 JEV 账户。
 
+JEV Combo 也可以改用自托管的决策模型，例如无需密钥的 Ollama `tev1`：添加一个 `baseUrl` 为完整
+`/v1/systemone` 端点的 `jev-decision` 提供商，并将其设为 Combo 的 `decisionProvider`。TypeSafe 凭据
+绝不会发送到该端点。详见[自托管决策模型](https://opencodex.me/zh-cn/guides/combos/)。
+
 ## 提供商与适配器
 
 <!-- sponsors:main-first-mention -->
 OpenAI（ChatGPT 登录或 API 密钥）、Anthropic、Google Gemini、xAI、Kimi、Azure OpenAI、Ollama
 （本地 + Cloud）、Cursor（实验性），以及每一个 OpenAI 兼容端点 —— 再加上 DeepSeek、
-Groq、OpenRouter、Together、Fireworks、Cerebras、Mistral、Hugging Face、NVIDIA NIM、MiniMax、
+Groq、OpenRouter、OpenGateway、Together、Fireworks、Cerebras、Mistral、Hugging Face、NVIDIA NIM、MiniMax、
 Qwen Cloud、Qoder Global 和 CN（官方 PAT + CLI）、SiliconFlow，以及更多。完整列表：`ocx init` 或
 [提供商文档](https://opencodex.me/zh-cn/guides/providers/)。
 
@@ -436,8 +436,8 @@ CLI/配置/管理 API 参考 —— 由 [`docs-site/`](../docs-site) 构建，�
 
 ## 开发
 
-源码开发需要 `PATH` 上的 `bun` CLI。它与已发布 npm 包捆绑的 Bun 运行时是分开的，
-后者只给已安装的 `ocx` 命令使用。
+源码开发需要 `PATH` 上的 `bun` CLI。已发布的 npm 包为已安装的 `ocx` 命令捆绑自己的 Bun
+运行时；包脚本也可能通过这个捆绑依赖解析 Bun。
 
 ```bash
 git clone https://github.com/lidge-jun/opencodex.git

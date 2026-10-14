@@ -7,6 +7,9 @@ export type ProviderOption = {
   authMode?: string;
   adapter?: string;
   baseUrl?: string;
+  /** Decision-service rows need a model; see jevDecisionRowIssue. */
+  defaultModel?: string;
+  models?: string[];
 };
 export type ModelOption = {
   provider: string;
@@ -25,6 +28,8 @@ export interface ComboWorkspaceProps {
   providerQuotaStates: ProviderQuotaStates;
   providers: ProviderOption[];
   models: ModelOption[];
+  /** Full catalog metadata, including rows hidden from the new-member picker. */
+  capabilityModels?: ModelOption[];
   /** Combo ids currently present in the live catalog (`provider === "combo"`). */
   cataloguedComboIds?: ReadonlySet<string>;
   loading?: boolean;
@@ -34,6 +39,8 @@ export interface ComboWorkspaceProps {
   onAdd: (intent?: ComboAddIntent) => void;
   adding: boolean;
   addIntent?: ComboAddIntent;
+  /** Decision service a `jev-auto` add pre-fills; null keeps canonical TypeSafe JEV. */
+  addDecisionProvider?: string | null;
   onCloseAdd: () => void;
   onCreated: (id: string) => void;
 }

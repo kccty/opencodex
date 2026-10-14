@@ -5,7 +5,13 @@ Native result continuations and function-result injection follow [the mode-speci
 Native steering follows [the shared WebSocket contract](../transports/streaming-health.md#experimental-native-mid-turn-steering); this surface's defaults remain unchanged.
 
 Vision preprocessing and image/video/search execution use the Responses
-[core module ownership](../transports/responses.md#core-module-ownership). This surface retains its existing behavior.
+[core module ownership](../transports/responses.md#core-module-ownership). Hosted inference in
+`src/images/loop.ts` follows [prepaid initial sends](../transports/responses-spend.md#prepaid-initial-sends):
+fetchResponse/runTurn receives the adapter budget, while generic HTTP/WS reports final dispatch.
+Async media producers own unsent cleanup before the streaming Response returns. Iteration cleanup
+does not release a hosted hop while its runTurn producer is active; producer settlement releases any
+unsent hop and clears only its matching pending reference. Standalone Images and direct callers
+retain their existing behavior.
 
 The configuration-only [plaintext V2 contract](../subagents.md#plaintext-v2-agent-messages)
 is scoped to canonical ChatGPT Responses forwarding; other source-area behavior described here is unchanged.
@@ -15,6 +21,53 @@ Codex Spark exception; standalone Images retain the separate relay contract belo
 [Responses transport](../transports/responses.md#responses-httpsse).
 
 Shared parsing and streaming follow the [request-copy](../transports/byte-accounting.md#request-copy-accounting) and [stream-buffer accounting](../transports/byte-accounting.md#stream-buffer-accounting) contracts. Response-attached WebSocket telemetry follows the [stage record identity contract](../transports/responses-wire-shapes.md#passthrough-sse-stream-shapes-314).
+
+Fetch-based Anthropic image bridge account recovery follows [the revoked-token contract](../providers/anthropic-account-pool.md#revoked-oauth-access-token-recovery), including output commitment and send-budget gates.
+
+## Hosted Responses image display
+
+For loopback-admitted Codex Responses clients,
+`src/server/responses-hosted-image-display.ts` projects hosted `image_generation_call`
+results into assistant messages with `phase: final_answer` and Markdown links to local
+artifacts. The final phase keeps the image outside collapsible progress output.
+`src/server/responses/passthrough-delivery.ts` applies this projection after continuation
+observers, on the client branch only, for SSE, JSON and JSON synthesized into SSE.
+The SSE projection emits consistent message lifecycle events and terminal snapshots,
+suppresses replaced hosted-image progress frames, and adjusts numeric sequence numbers
+for inserted or removed events, identically in both relay shapes.
+Hosted items in the continuation cache retain their upstream representation; other
+client rewrites keep their existing cache policy. Generic, remotely admitted and non-Responses
+clients do not receive this filesystem projection. Individual image item events without
+a string item id or a valid non-negative integer output index pass through without
+allocating display state, so unidentified items cannot collide at a synthetic index.
+
+Full-history assistant messages can replay the display Markdown without their generated
+item ids. At Responses request preparation and at the remote compaction handler
+(`src/server/responses/compact.ts`), exact generated links become opaque artifact HTTP
+references before routing, helper dispatch and the upstream compact request. A link
+matches when its target, as a plain path or `file://` URL with either separator and dot
+segments resolved, names an `img-codex-<uuid>` image directly inside the current
+artifact directory; on macOS and Windows the comparison also ignores letter case. This
+does not read files and still applies after artifact pruning; unrelated paths, nested
+directories, user messages and tool payloads retain their original content. Local display
+uses filesystem links because remote Markdown media has a separate client safety gate;
+HTTP references here are for upstream context, not a claim of desktop HTTP rendering.
+
+Image data must pass the shared base64, format and byte-budget checks in
+`src/images/artifacts.ts`. Files use random names, exclusive creation and mode 0600;
+the artifact directory uses mode 0700 on creation. Per-response display state is capped
+at 128 image items. Each retained identity/metadata envelope is limited to 64 KiB of
+serialized UTF-8 JSON, with a 1 MiB aggregate allowance independent of image decoding.
+Metadata is preserved unchanged within those bounds, and repeated lifecycle inputs are
+validated even when display state already exists. Snapshot image identities are unique,
+including against non-image items; explicit ids and fallback indices use separate namespaces.
+Projected JSON and SSE lifecycle output is preflighted against the 32 MiB transport limit
+before artifact writes or serialization, including metadata reused from earlier events.
+The existing 50 MiB per-image and 100 MiB aggregate decoded limits still apply.
+Refused display results return HTTP 502 before streaming or a failed SSE terminal after
+streaming has started. Retention runs after the batch. Failed or invalid results produce a bounded
+display message without reflecting payloads or filesystem errors. URL results and
+partial-image previews are not downloaded or rendered by this projection.
 
 ## Standalone Images
 
@@ -134,7 +187,7 @@ Pool quota producers and account commands follow the [bounded raw-observation co
 
 Account quota surfaces use [safe probe diagnostics](../transports/inventory.md#account-quota-failure-diagnostics) separately from quota validity, credential health and routing authority.
 
-Combo child requests normalize effort and thinking controls against the selected target while retaining reasoning summaries; strict unknown targets preserve caller controls. The [Responses transport owner](../transports/responses.md) documents this boundary, and native Chat removes effort only for an explicit empty declaration or no-reasoning model.
+Combo child requests normalize effort and thinking controls against the selected target while retaining reasoning summaries; strict unknown targets preserve caller controls. The [Responses transport owner](../transports/responses.md) documents this boundary, and native Chat capability stripping applies only for an explicit empty declaration or no-reasoning model; an initial JEV null choice separately strips caller effort.
 
 Live sideband admission and its bounded upstream handshake follow the [runtime contract](../runtime.md#live-sideband-handshake); the ordinary Responses WebSocket exchange remains separate.
 

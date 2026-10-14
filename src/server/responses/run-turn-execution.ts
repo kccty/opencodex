@@ -1,3 +1,4 @@
+import { mapSpendLedgerStorageError } from "./spend-storage-error";
 import type { ResponsesRequestContext, ResponsesAdmissionState } from "./core-options";
 import type { PreparedResponsesRequest } from "./request-prepare";
 import type { ResponsesTransport } from "./request-transport";
@@ -10,6 +11,7 @@ import { createAdapterEventQueue, preflightAdapterEvents, type AdapterEventPrefl
 import {
   bindRouteReasoningReplayScope,
   adapterNeedsForcedContinuation,
+  adapterNeedsToolCallContinuation,
   adapterResponseReachedServingTerminal,
 } from "./core-replay";
 import { noteAttemptRecoveryWithheld, sealRequestAttemptIdentity, recordAttemptCredentialSource } from "../request-log";
@@ -19,8 +21,9 @@ import type { AttemptRecoveryKind } from "../../usage/log";
 import { providerFetch } from "./fetch-helpers";
 import { normalizeLogConversationId } from "../request-log-conversation";
 import { normalizeDeclaredToolName, type AdapterEvent, type OcxProviderContinuationState } from "../../types";
-import { adapterFailureFromMessage, SEND_BUDGET_EXHAUSTED_CODE } from "../../lib/errors";
+import { adapterFailureFromMessage, SEND_BUDGET_EXHAUSTED_CODE, SPEND_LEDGER_STORAGE_UNAVAILABLE_CODE, type OcxErrorPayload } from "../../lib/errors";
 import { SendBudgetExhaustedError, markResponseNonReplayable } from "../../lib/upstream-retry";
+import { hasKeyPoolFailover, rotateProviderTransportOn401, rotateProviderTransportOn429 } from "../../providers/key-failover";
 import {
   hasEligibleGenericOAuthFailoverTarget,
   isGenericOAuthFailoverEnabled,
@@ -50,6 +53,8 @@ import { undeclaredToolCallMessage } from "../responses-undeclared-tool-guard";
 import { planWebSearch } from "../../web-search";
 import { runTurnWebSearchInitialParsed, runTurnWebSearchLoop } from "../../web-search/run-turn-loop";
 import { WEB_SEARCH_TOOL_NAME } from "../../web-search/synthetic-tool";
+import { orderDevinMessagesOutput } from "../../claude/devin-output-order";
+import { unboundPoolSpendRefusalMessage } from "../workflow-refusal";
 
 // LOCAL PATCH (runturn-websearch): top-level fields route binding or the
 // adapter itself may write during a turn. Iteration-local `turnParsed` objects
@@ -61,6 +66,7 @@ const RUNTURN_WS_ROUTE_STATE_KEYS = [
   "_cursorConversationId",
   "_cursorClientThreadId",
   "_kiroAuthContext",
+  "_zedAuthContext",
   "_providerContinuation",
   "_providerContinuationOwner",
   "_providerContinuationCandidate",
@@ -181,6 +187,13 @@ export async function executeResponsesRunTurn(
 
     const runTurnAbort = new AbortController();
     const cleanupRunTurnAbort = linkAbortSignal(runTurnAbort, options.abortSignal);
+    const devinProducers = new Set<AbortController>();
+    const orderMessagesOutput = (source: AsyncIterable<AdapterEvent>): AsyncIterable<AdapterEvent> =>
+      inboundWire === "anthropic" && transportState.runTurnAdapter.name === "devin" && !routedCompaction
+        ? orderDevinMessagesOutput(source, translatorBudget, runTurnAbort.signal, () => {
+            for (const producer of devinProducers) producer.abort();
+          })
+        : source;
     const queue = createAdapterEventQueue({
       onBacklogExceeded: () => runTurnAbort.abort(),
     });
@@ -212,6 +225,11 @@ export async function executeResponsesRunTurn(
     // in-flight; only the latest dispatch may merge adapter-written route
     // state back onto `parsed`, or the superseded attempt would restore the
     // failed account's cursor/continuation over the rotation's rebind.
+    type KeyBinding = Extract<NonNullable<ReturnType<typeof adapterBindings.get>>, { kind: "api-key" }>;
+    const failedKeyBindings = new WeakMap<Extract<AdapterEvent, { type: "error" }>, KeyBinding>();
+    const failedKeys = new Set<string>();
+    const keyAttemptLimit = route.provider.apiKeyPool?.length ?? 0;
+    let lastKeyFailure: Extract<AdapterEvent, { type: "error" }> | undefined;
     let runTurnAttemptSeq = 0;
     const runTurnAttempt = async (
       targetQueue: AdapterEventQueue,
@@ -224,16 +242,27 @@ export async function executeResponsesRunTurn(
       preacquiredSlot?: ProviderRequestSlot,
     ): Promise<void> => {
       const attemptSeq = ++runTurnAttemptSeq;
+      if (attemptSeq === 1 && options.comboInitialSend) options.comboInitialSend.producerOwned = true;
       let pacingSlot = preacquiredSlot;
+      let sentKeyBinding: KeyBinding | undefined;
       const emit = (event: AdapterEvent) => {
+        if (event.type === "error" && sentKeyBinding) failedKeyBindings.set(event, sentKeyBinding);
         options.onCompactionRecoveryAdapterEvent?.(event);
         targetQueue.push(event);
       };
+      let producerAbort = runTurnAbort;
+      let cleanupProducerAbort: (() => void) | undefined;
       try {
         if (!pacingSlotAcquired) {
           pacingSlot = await waitForProviderRequestSlot(route.providerName, route.provider, route.modelId, runTurnAbort.signal);
         }
         await refreshRunTurnSelection();
+        const selectedBinding = adapterBindings.get(transportState.runTurnAdapter);
+        if (lastKeyFailure && selectedBinding?.kind === "api-key"
+          && failedKeys.has(selectedBinding.provider.apiKey ?? "")) {
+          emit(lastKeyFailure);
+          return;
+        }
         // LOCAL PATCH (runturn-websearch): refreshRunTurnSelection binds route
         // state onto `parsed`; mirror it onto the iteration-local copy the
         // adapter actually receives.
@@ -261,11 +290,16 @@ export async function executeResponsesRunTurn(
             turnScopedPacing: true,
           },
         );
+        if (inboundWire === "anthropic" && transportState.runTurnAdapter.name === "devin" && !routedCompaction) {
+          producerAbort = new AbortController();
+          cleanupProducerAbort = linkAbortSignal(producerAbort, runTurnAbort.signal);
+          devinProducers.add(producerAbort);
+        }
         await transportState.runTurnAdapter.runTurn?.(
           turnParsed,
           {
             headers: requestState.selectedForwardHeaders,
-            abortSignal: runTurnAbort.signal,
+            abortSignal: producerAbort.signal,
             comboAttempt: options.comboAttempt === true,
             translatorBudget,
             providerFetch: runTurnProviderFetch,
@@ -273,13 +307,14 @@ export async function executeResponsesRunTurn(
             // The only way the request budget reaches a transport the adapter owns. Without it
             // a Cursor turn's inner ladder was three physical sends the cap read as one.
             ...(adapterDispatchBudget ? { sendBudget: adapterDispatchBudget } : {}),
-            onPhysicalSend: send => noteAdapterPhysicalSend(
-              logCtx.usageLogInputTokens,
-              // The attempt's own recovery kind still labels its first send when the adapter
-              // does not supply one of its own.
-              { ...send, ...(send.recovery ?? recovery ? { recovery: send.recovery ?? recovery } : {}) },
-              { includeFirst: reportsOwnSends },
-            ),
+            onPhysicalSend: send => {
+              // Capture once at this attempt's send, before later selection or recovery changes it.
+              const binding = adapterBindings.get(transportState.runTurnAdapter);
+              if (!sentKeyBinding && binding?.kind === "api-key") sentKeyBinding = binding;
+              noteAdapterPhysicalSend(logCtx.usageLogInputTokens,
+                { ...send, ...(send.recovery ?? recovery ? { recovery: send.recovery ?? recovery } : {}) },
+                { includeFirst: reportsOwnSends });
+            },
             onRecoveryWithheld: noteAdapterRecoveryWithheld,
           },
           emit,
@@ -296,7 +331,8 @@ export async function executeResponsesRunTurn(
           Object.assign(parsed, routeState);
         }
       } catch (err) {
-        emit(err instanceof RequestPacingQueueOverloadError
+        const storageRefusal = mapSpendLedgerStorageError(err, logCtx);
+        emit(storageRefusal ? { type: "error", ...storageRefusal } : err instanceof RequestPacingQueueOverloadError
           ? {
               type: "error",
               status: 429,
@@ -314,13 +350,16 @@ export async function executeResponsesRunTurn(
                 status: 429,
                 errorType: "rate_limit_error",
                 code: SEND_BUDGET_EXHAUSTED_CODE,
-                message: err.message,
+                message: unboundPoolSpendRefusalMessage(logCtx) ?? err.message,
               }
             : {
                 type: "error",
                 message: err instanceof Error ? err.message : String(err),
               });
       } finally {
+        if (attemptSeq === 1) options.comboInitialSend?.permit.release();
+        devinProducers.delete(producerAbort);
+        cleanupProducerAbort?.();
         releaseProviderRequestSlot(pacingSlot);
         // Cursor assigns a stable conversation id inside runTurn on the first headerless
         // turn; backfill so Logs can filter/total that opening request (#330 / #522).
@@ -337,6 +376,7 @@ export async function executeResponsesRunTurn(
     const runTurn = async (): Promise<void> => runTurnAttempt(queue, undefined, true, wsFirstParsed, initialPacingSlot);
     const runTurnFailoverArmed = () =>
       route.provider.authMode === "oauth"
+      || (transportState.runTurnAdapter.name === "qoder" && hasKeyPoolFailover(route.provider))
       || !!(transportState.genericFailoverAccountId
         && isGenericOAuthFailoverEnabled(config, route.providerName));
     const dispatchSearchIteration = (iterParsed: PreparedResponsesRequest["parsed"]): AsyncIterable<AdapterEvent> => {
@@ -345,14 +385,14 @@ export async function executeResponsesRunTurn(
       });
       void runTurnAttempt(iterQueue, undefined, false, iterParsed);
       const stream = iterQueue.stream();
-      if (!runTurnFailoverArmed()) return stream;
+      if (!runTurnFailoverArmed()) return orderMessagesOutput(stream);
       // LOCAL PATCH (runturn-websearch): a post-search iteration can open on a
       // 429 too — the search cells already reached the client, so only this
       // answer call rotates. Preflight replays it on the next account with the
       // grown history intact; a mid-stream error still ends the turn as before.
-      return (async function* () {
+      return orderMessagesOutput((async function* () {
         yield* await preflightRunTurnFailover(stream, iterParsed);
-      })();
+      })());
     };
     // Rebind the turn to an admitted account. The failed attempt emitted no client-visible bytes,
     // so replay is safe, but a Cursor conversation/checkpoint is credential-scoped: carrying its
@@ -440,9 +480,51 @@ export async function executeResponsesRunTurn(
         return false;
       }
     };
+    const recoverRunTurnKey = async (
+      error: Extract<AdapterEvent, { type: "error" }>,
+    ): Promise<AttemptRecoveryKind | undefined> => {
+      const binding = failedKeyBindings.get(error);
+      if (error.apiKeyRecovery !== true || (error.status !== 401 && error.status !== 429)
+        || !binding || runTurnAbort.signal.aborted || !hasKeyPoolFailover(route.provider)
+        || failedKeys.size >= keyAttemptLimit) return undefined;
+      const failed = binding.provider;
+      if (!failed.apiKey || !failed._apiKeyAttempt || failedKeys.has(failed.apiKey)) return undefined;
+      const hop = reserveCredentialHop("auth-recovery", `${route.providerName}|${route.modelId}|runturn-key-${error.status}`);
+      if (!hop.allowed) return undefined;
+      failedKeys.add(failed.apiKey);
+      lastKeyFailure = error;
+      try {
+        const rotate = error.status === 401 ? rotateProviderTransportOn401 : rotateProviderTransportOn429;
+        const rotated = rotate(config, route.providerName, failed, {
+          attemptedKey: failed.apiKey, attemptedSelection: failed._apiKeyAttempt,
+          promptCacheKey: parsed.options.promptCacheKey,
+        });
+        if (!rotated || failedKeys.size >= keyAttemptLimit || failedKeys.has(rotated.apiKey ?? "") || runTurnAbort.signal.aborted) {
+          hop.permit?.release();
+          return undefined;
+        }
+        route.provider = rotated;
+        const adapter = await refreshRunTurnAdapter(parsed);
+        if (!adapter.runTurn || failedKeys.has(route.provider.apiKey ?? "") || runTurnAbort.signal.aborted) {
+          hop.permit?.release();
+          return undefined;
+        }
+        bindRouteReasoningReplayScope({ parsed, providerName: route.providerName, provider: route.provider,
+          adapterName: adapter.name, forwardHeaders: requestState.selectedForwardHeaders });
+        sealRequestAttemptIdentity(logCtx.activeAttempt, logCtx.provider, adapter.name, logCtx.accountLogLabel);
+        recordAttemptCredentialSource(logCtx.activeAttempt, route.providerName, route.provider, adapter.name);
+        sendBudgetState.pendingHopPermit = hop.permit;
+        return error.status === 401 ? "key-401" : "key-429";
+      } catch {
+        hop.permit?.release();
+        return undefined;
+      }
+    };
     const recoverRunTurnAdapterOnPreflightError = async (
       error: Extract<AdapterEvent, { type: "error" }>,
     ): Promise<AttemptRecoveryKind | undefined> => {
+      const keyRecovery = await recoverRunTurnKey(error);
+      if (keyRecovery) return keyRecovery;
       if (await recoverRunTurnAdapterOnPreflight401(error)) return "oauth-401";
       if (await rotateRunTurnAdapterOnPreflight429(error)) return "oauth-account-429";
       return undefined;
@@ -614,7 +696,7 @@ export async function executeResponsesRunTurn(
         onBacklogExceeded: () => runTurnAbort.abort(),
       });
       void runTurnAttempt(retryQueue, "empty-completion");
-      return retryQueue.stream();
+      return orderMessagesOutput(retryQueue.stream());
     };
 
     const { toolNsMap, declaredToolNames, toolParameterSchemas, freeformToolNames, bareCustomToolNames, toolSearchToolNames } = toolBridgeMaps;
@@ -651,6 +733,7 @@ export async function executeResponsesRunTurn(
         retryAfter: resolveClientRetryAfter({ status: httpStatus, message: error.message }),
       });
     };
+    // Messages ingress forces internal streaming, including buffered client requests.
     if (parsed.stream) {
       try {
       void runTurn();
@@ -658,7 +741,11 @@ export async function executeResponsesRunTurn(
       const stallTimeoutSec = wsPlan?.stallTimeoutSec ?? config.stallTimeoutSec;
       // A disabled watchdog (0) is not a zero preflight: it would commit SSE before Devin's first
       // event and deliver a pre-output 429 in-stream. Fall back to the default finite bound.
-      const preflightDeadlineAt = grokDevinPreflight
+      // A key-pool preflight must not outlast the stall budget, or a silent CLI holds the SSE
+      // Response (heartbeats, stall watchdog) hostage; the OAuth preflight wait is unchanged.
+      const keyPoolPreflight = transportState.runTurnAdapter.name === "qoder"
+        && route.provider.authMode !== "oauth" && hasKeyPoolFailover(route.provider);
+      const preflightDeadlineAt = grokDevinPreflight || keyPoolPreflight
         ? Date.now() + (resolveStallTimeoutSec(stallTimeoutSec) || DEFAULT_STALL_TIMEOUT_SEC) * 1_000
         : undefined;
       if (runTurnFailoverArmed()) {
@@ -690,7 +777,8 @@ export async function executeResponsesRunTurn(
           runTurnAbort.abort();
           queue.close();
           const message = preflight.error?.message ?? "Adapter ended before producing a response";
-          const failure = formatErrorResponse(502, "upstream_error", redactSecretString(message));
+          const failure = formatErrorResponse(preflight.error?.code === SPEND_LEDGER_STORAGE_UNAVAILABLE_CODE ? 503 : 502,
+            preflight.error?.code === SPEND_LEDGER_STORAGE_UNAVAILABLE_CODE ? SPEND_LEDGER_STORAGE_UNAVAILABLE_CODE : "upstream_error", redactSecretString(message));
           // A replay-unsafe heartbeat means the adapter already ran a local side effect, so the
           // combo must not send this turn to another target: the failure stays with this child.
           if (preflight.replayUnsafe) markResponseNonReplayable(failure);
@@ -699,6 +787,8 @@ export async function executeResponsesRunTurn(
         }
         eventSource = preflight.stream;
       }
+      // Preflight sees raw output before Messages delays text for the late signature.
+      eventSource = orderMessagesOutput(eventSource);
       // LOCAL PATCH (runturn-websearch): intercept web_search calls across
       // iterations; terminal output keeps flowing through the same queue/bridge.
       if (wsPlan) {
@@ -769,7 +859,10 @@ export async function executeResponsesRunTurn(
                 parsed._rawBody,
                 response,
                 continuationStateForResponse(providerState),
-                responseStateOptions(adapterNeedsForcedContinuation(transportState.adapter.name)),
+                {
+                  ...responseStateOptions(adapterNeedsForcedContinuation(transportState.adapter.name)),
+                  retainForToolContinuation: adapterNeedsToolCallContinuation(transportState.adapter.name),
+                },
               );
             }
             notifyResponseComplete(response);
@@ -884,7 +977,9 @@ export async function executeResponsesRunTurn(
           const message = classifiedError?.message ?? (firstMeaningful?.type === "error"
             ? firstMeaningful.message
             : "Adapter ended before producing a response");
-          const failure = formatErrorResponse(502, "upstream_error", redactSecretString(message));
+          const storageRefusal = firstMeaningful?.type === "error" && firstMeaningful.code === SPEND_LEDGER_STORAGE_UNAVAILABLE_CODE;
+          const failure = formatErrorResponse(storageRefusal ? 503 : 502,
+            storageRefusal ? SPEND_LEDGER_STORAGE_UNAVAILABLE_CODE : "upstream_error", redactSecretString(message));
           if (replayUnsafe) markResponseNonReplayable(failure);
           return failure;
         }
@@ -914,7 +1009,10 @@ export async function executeResponsesRunTurn(
           parsed._rawBody,
           json,
           continuationStateForResponse(providerState),
-          responseStateOptions(adapterNeedsForcedContinuation(transportState.adapter.name)),
+          {
+            ...responseStateOptions(adapterNeedsForcedContinuation(transportState.adapter.name)),
+            retainForToolContinuation: adapterNeedsToolCallContinuation(transportState.adapter.name),
+          },
         );
       }
       // #1926 gap 2: the buffered path queued its signature persists inside
@@ -925,7 +1023,10 @@ export async function executeResponsesRunTurn(
         commitReasoningReplayServingRoute();
       }
       notifyResponseComplete(json);
-      return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(json), {
+        status: (json.error as OcxErrorPayload | undefined)?.code === SPEND_LEDGER_STORAGE_UNAVAILABLE_CODE ? 503 : 200,
+        headers: { "Content-Type": "application/json" },
+      });
     } catch (error) {
       if (!isTranslatorBudgetExceededError(error)) throw error;
       runTurnAbort.abort();

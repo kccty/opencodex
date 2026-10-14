@@ -189,7 +189,7 @@ describe("main policy window replacement", () => {
       }
       // Replacement proof is per-observation, never a persisted permission to drop future evidence.
       expect(policy).not.toHaveProperty("shortWindowAbsent");
-      expect(getMainAccountHardLockStatus(cfg).state).toBe(percent < 95 ? "ready" : "blocked");
+      expect(getMainAccountHardLockStatus(cfg).state).toBe(percent < 98 ? "ready" : "blocked");
       publish({ rate_limit: { primary_window: { used_percent: 99, limit_window_seconds: 18_000 } } });
       expect(getMainAccountHardLockStatus(cfg).state).toBe("blocked");
     });
@@ -334,21 +334,21 @@ describe("cold persisted policy percentage ranges", () => {
           ? { monthlyPercent: 99, monthlyIsPrimaryWindow: true }
           : { weeklyPercent: 99 };
         const disk = writeColdPolicy({ ...blocking, [field]: value });
-        expect(getMainAccountHardLockStatus(cfg)).toEqual({ enabled: true, state: "blocked" });
+        expect(getMainAccountHardLockStatus(cfg)).toMatchObject({ enabled: true, state: "blocked" });
         expect(getMainPolicyQuota()).toEqual({ updatedAt: disk.updatedAt, ...blocking });
         // The ordinary disk cache is intentionally not sanitized by the policy parser.
         expect(getAccountQuota(MAIN)).toEqual(disk);
 
         const isolated = writeColdPolicy({ [field]: value, monthlyIsPrimaryWindow: true });
         expect(getMainPolicyQuota()).toEqual({ updatedAt: isolated.updatedAt });
-        expect(getMainAccountHardLockStatus(cfg)).toEqual({ enabled: true, state: "unknown" });
+        expect(getMainAccountHardLockStatus(cfg)).toMatchObject({ enabled: true, state: "unknown" });
       },
     );
 
     test.each([0, 97.99, 98, 99, 100])(`${field}=%s survives disk hydration without clamping`, value => {
       const disk = writeColdPolicy({ [field]: value });
       expect(getMainPolicyQuota()).toEqual(disk);
-      expect(getMainAccountHardLockStatus(cfg).state).toBe(value < 95 ? "ready" : "blocked");
+      expect(getMainAccountHardLockStatus(cfg).state).toBe(value < (field === "shortPercent" ? 90 : 98) ? "ready" : "blocked");
     });
   }
 
@@ -364,7 +364,7 @@ describe("cold persisted policy percentage ranges", () => {
     expect(getMainPolicyQuota()).toEqual({ updatedAt: disk.updatedAt, weeklyPercent: 99,
       shortWindowSeconds: 18_000, shortResetAt: 2_000_000_000, shortObservedAt: 1_700_000_000_000, resetCredits: 150 });
     // The rejected 5h reading is unknown, but it cannot mask the valid weekly99 block.
-    expect(getMainAccountHardLockStatus(cfg)).toEqual({ enabled: true, state: "blocked" });
+    expect(getMainAccountHardLockStatus(cfg)).toMatchObject({ enabled: true, state: "blocked" });
   });
 
   test.each([0, 150, 2_000_000_000])("metadata and credits retain nonnegative %s independently of usage ranges", value => {

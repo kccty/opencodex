@@ -54,7 +54,7 @@ import { noteExplicitShutdownRequested } from "./management/system-restart";
 import { filterRequestLogs, getRequestLogEntries, type RequestLogEntry } from "./request-log";
 import { estimateComboCost, estimateRequestCost, normalizeCostTokens, tokensPerSecond } from "../usage/cost";
 import type { PersistedUsageAttempt } from "../usage/log";
-import { isAllowedManagementOrigin, jsonResponse, providerManagementConfigError, publicProviderBaseUrl, safeConfigDTO } from "./auth-cors";
+import { inheritTrustedHubManagementRequest, isAllowedManagementOrigin, jsonResponse, providerManagementConfigError, publicProviderBaseUrl, safeConfigDTO } from "./auth-cors";
 import { applySystemEnvToggle } from "./system-env";
 
 import type { ManagementApiDeps } from "./management/context";
@@ -66,9 +66,11 @@ import { handleRoutingAnalyticsRoutes } from "./management/routing-analytics-rou
 import { handleMetricsRoutes } from "./management/metrics-routes";
 import { handleProviderRoutes } from "./management/provider-routes";
 import { handleModelRoutes } from "./management/model-routes";
+import { handleClaudeInterceptRoutes } from "./management/claude-intercept-routes";
 import { handleAgentSettingsRoutes } from "./management/agent-settings-routes";
 import { handleOauthAccountRoutes } from "./management/oauth-account-routes";
 import { handleComboRoutes } from "./management/combo-routes";
+import { handleDecisionRoutes } from "./management/decision-routes";
 import { handleSystemRoutes } from "./management/system-routes";
 import { handleSidebarRoutes } from "./management/sidebar-routes";
 import { handleUsageTimelineRoutes } from "./management/usage-timeline-routes";
@@ -77,6 +79,9 @@ import { handleCodexPromptRoutes } from "./management/codex-prompt-routes";
 import { handleIntegrationRoutes } from "./management/integration-routes";
 import { handleNativeIntegrationRoutes } from "./management/native-integration-routes";
 import { handleClaudeDesktopPickerRoutes } from "./management/claude-desktop-picker-routes";
+import { handleDesktopCompatibilityRoutes } from "./management/desktop-compatibility-routes";
+import { handleDesktopCompatibilityRuntimeRoutes } from "./management/desktop-compatibility-runtime-routes";
+import { handleDesktopCompatibilitySettingsRoutes } from "./management/desktop-compatibility-settings-routes";
 import { handleCursorIntegrationRoutes } from "./management/cursor-integration-routes";
 import type { ManagementContext } from "./management/context";
 import type { ManagementPrincipal, ManagementSessionControl } from "./management-auth";
@@ -166,6 +171,12 @@ async function handleWorkflowBudgetRoutesOnDemand(ctx: ManagementContext): Promi
   return handleWorkflowBudgetRoutes(ctx);
 }
 
+async function handleCodexAgentRoleRoutesOnDemand(ctx: ManagementContext): Promise<Response | null> {
+  if (!pathInManagementNamespace(ctx.url.pathname, "/api/codex-agent-roles")) return null;
+  const { handleCodexAgentRoleRoutes } = await import("./management/codex-agent-role-routes");
+  return handleCodexAgentRoleRoutes(ctx);
+}
+
 /**
  * Lazy like the Lab and routing-profile handlers: the protocol planner reaches the router and
  * the ingress eligibility rules, which no other dashboard request needs.
@@ -234,7 +245,9 @@ export async function handleManagementAPI(
     if (verified.status !== 200) {
       return jsonResponse({ error: "account switch body rejected" }, verified.status, req, config);
     }
+    const sourceReq = req;
     req = new Request(req.url, { method: req.method, headers: req.headers, body: Buffer.from(verified.body) });
+    inheritTrustedHubManagementRequest(sourceReq, req);
   }
   // Management bodies are small JSON (provider names, key ids, settings). Reject oversized
   // payloads before any handler buffers them — the data plane has its own decompression cap.
@@ -326,7 +339,8 @@ export async function handleManagementAPI(
   }
   let routed: Response | null | undefined;
   try {
-    routed = handleSessionRoutes(ctx)
+    routed = await handleClaudeInterceptRoutes(ctx)
+    ??     handleSessionRoutes(ctx)
     ??     (await handleLinkRoutesOnDemand(ctx))
     ??     (await handleRemoteWorkspaceRoutesOnDemand(ctx))
     ??     (await handleConfigRoutes(ctx))
@@ -336,6 +350,7 @@ export async function handleManagementAPI(
     ??     (await handleQuotaResetRoutesOnDemand(ctx))
     ??     (await handleLowQuotaRoutesOnDemand(ctx))
     ??     (await handleWorkflowBudgetRoutesOnDemand(ctx))
+    ??     (await handleCodexAgentRoleRoutesOnDemand(ctx))
     ??     (await handleProtocolRoutesOnDemand(ctx))
     ??     (await handleGrokCouponRoutesOnDemand(ctx))
     ??     (await handleAnthropicResetGrantRoutesOnDemand(ctx))
@@ -348,9 +363,13 @@ export async function handleManagementAPI(
     ??     (await handleNativeIntegrationRoutes(ctx))
     ??     (await handleCursorIntegrationRoutes(ctx))
     ??     (await handleClaudeDesktopPickerRoutes(ctx))
+    ??     (await handleDesktopCompatibilityRoutes(ctx))
+    ??     (await handleDesktopCompatibilityRuntimeRoutes(ctx))
+    ??     (await handleDesktopCompatibilitySettingsRoutes(ctx))
     ??     (await handleAgentSettingsRoutes(ctx))
     ??     (await handleCodexPromptRoutes(ctx))
     ??     (await handleOauthAccountRoutes(ctx))
+    ??     (await handleDecisionRoutes(ctx))
     ??     (await handleComboRoutes(ctx))
     ??     (await handleSystemRoutes(ctx))
     ??     (await handleLabRoutesOnDemand(ctx))

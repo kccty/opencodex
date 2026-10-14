@@ -232,7 +232,7 @@ async function warmAccount(config: OcxConfig, accountId: string): Promise<void |
     try {
       await warmCodexAccount({ ...token, onCompleted: headers => {
         if (isCodexAccountGenerationLive(accountId, token.generation)) {
-          applyAccountQuotaFromUpstreamHeaders(accountId, headers, writerGeneration, undefined, { poolWriter });
+          applyAccountQuotaFromUpstreamHeaders(accountId, headers, writerGeneration, undefined, { poolWriter, poolResponse: true });
         }
       } });
     } catch (error) {
@@ -377,8 +377,13 @@ export async function runCodexQuotaAutoRefresh(
           // (a frozen weekly left the hard lock admitting against a days-old reading while
           // the account burned to 100%). A snapshot that still moves means the account is
           // being served: re-read its percentages on a slow cadence so every governing
-          // window stays observable between resets.
+          // window stays observable between resets. The main account is excluded: its
+          // refresh is owned by the native-main admission path, which reads WHAM itself.
+          // A window whose reset already passed takes the warmup path instead: discovery
+          // rereads headers there, so polling first would only race it.
           if (quota
+            && dueCodexQuotaAutoRefreshWindows(config, accountId, quota, now) === null
+            && accountId !== MAIN_CODEX_ACCOUNT_ID
             && now - quota.updatedAt < PERCENT_PROBE_ACTIVITY_MS
             && (percentProbeNextByAccount.get(accountId) ?? 0) <= now) {
             percentProbeNextByAccount.set(accountId, now + PERCENT_REFRESH_MS);

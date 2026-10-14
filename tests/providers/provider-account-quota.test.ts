@@ -301,6 +301,9 @@ describe("fetchProviderAccountQuotas", () => {
           expires_in: 3600,
         }), { status: 200 });
       }
+      // A refresh also reads the account profile for its subscription plan (#6935); that is
+      // not a usage probe, so it must not be counted as one.
+      if (url.includes("/api/oauth/profile")) return new Response("{}", { status: 404 });
       const auth = new Headers(init?.headers).get("authorization") ?? "";
       if (auth.endsWith("token-bg-fresh")) {
         usageForBg += 1;
@@ -342,10 +345,13 @@ describe("fetchProviderAccountQuotas", () => {
     let releaseUsage!: () => void;
     const usageGate = new Promise<void>(resolve => { releaseUsage = resolve; });
     let usageCalls = 0;
+    let usageStarted!: () => void;
+    const usageEntered = new Promise<void>(resolve => { usageStarted = resolve; });
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
       const auth = new Headers(init?.headers).get("authorization") ?? "";
       if (auth.endsWith("token-first")) {
         usageCalls += 1;
+        usageStarted();
         await usageGate;
         return new Response(usageBody(70, 15), { status: 200 });
       }
@@ -365,8 +371,10 @@ describe("fetchProviderAccountQuotas", () => {
     };
     const reportPromise = fetchProviderQuotaReports(config, true);
     // Switch active mid-flight before Anthropic responds.
-    await setActiveAccount("anthropic", second!.id);
-    releaseUsage();
+    try {
+      await usageEntered;
+      await setActiveAccount("anthropic", second!.id);
+    } finally { releaseUsage(); }
     const switchedReport = await reportPromise;
     expect(switchedReport.reports).toEqual([]);
     expect(getCachedProviderAccountQuota("anthropic", first!.id)?.fiveHourPercent).toBe(70);

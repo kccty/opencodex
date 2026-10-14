@@ -254,6 +254,18 @@ route WSS. Unsupported or malformed selected proxy values skip the WebSocket att
 existing SSE path immediately; they never fall through to a lower-priority proxy or direct WebSocket
 egress. HTTP/SSE fallback retains Bun fetch's own proxy rules, which do not consult ALL_PROXY.
 
+### Image-bearing canonical turns
+
+The pre-dial exclusion above is one of two image boundaries on the canonical Responses path. The
+other sits at parsing: once the latest completed compact-wire item exists, earlier `input_image`
+blocks in schema-compatible message and tool-output arrays are copy-on-write replaced with a fixed
+text marker, so later turns and the process-local continuation cache stop carrying historical
+image bytes. Newer images survive, a `compaction_trigger` alone is not success, and the client's
+own transcript is never rewritten.
+
+> Decision record: [ADR-0123](../decisions/ADR-0123-responses-http-sse.md)
+
+> Decision record: [ADR-0124](../decisions/ADR-0124-responses-http-sse.md)
 The endpoint handles `response.create`, ignores `response.processed`, supports warmup
 `generate: false`, and feeds the same request pipeline as HTTP/SSE.
 
@@ -327,7 +339,7 @@ Pool quota producers and account commands follow the [bounded raw-observation co
 
 Account quota surfaces use [safe probe diagnostics](inventory.md#account-quota-failure-diagnostics) separately from quota validity, credential health and routing authority.
 
-Combo child requests normalize effort and thinking controls against the selected target while retaining reasoning summaries; strict unknown targets preserve caller controls. The [Responses transport owner](responses.md) documents this boundary, and native Chat removes effort only for an explicit empty declaration or no-reasoning model.
+Combo child requests normalize effort and thinking controls against the selected target while retaining reasoning summaries; strict unknown targets preserve caller controls. The [Responses transport owner](responses.md) documents this boundary, and native Chat capability stripping applies only for an explicit empty declaration or no-reasoning model; an initial JEV null choice separately strips caller effort.
 
 Live sideband admission and its bounded upstream handshake follow the [runtime contract](../runtime.md#live-sideband-handshake); the ordinary Responses WebSocket exchange remains separate.
 

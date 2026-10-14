@@ -624,9 +624,14 @@ function usageFromAnthropic(usage: unknown): OcxUsage | undefined {
   // canonical inclusive convention (types.ts OcxUsage / devlog 070).
   const inputTokens = input + read + write;
   if (!Number.isFinite(inputTokens)) return undefined;
+  // Thinking is a reported subset of output, not extra billable output or an
+  // estimate from visible summaries. Invalid optional detail leaves totals intact.
+  const thinking = isAnthropicRecord(usage.output_tokens_details) ? usage.output_tokens_details.thinking_tokens : undefined;
+  const reasoningOutputTokens = typeof thinking === "number" && Number.isFinite(thinking) && thinking >= 0 && thinking <= output ? thinking : undefined;
   return {
     inputTokens,
     outputTokens: output,
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
     ...(hasCache ? {
       cachedInputTokens: read,
       cacheReadInputTokens: read,
@@ -1011,7 +1016,7 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
       // "none" is not the same as absent. Omitting `thinking` lets a default-on model think
       // anyway, and thinking shares the caller's `max_tokens` — which truncates a small-budget
       // request before it can emit its stop sequence (#545). Say "disabled" out loud where the
-      // model both defaults to thinking and accepts being told not to.
+        // model both defaults to thinking and accepts being told not to.
       const effectiveReasoning = parsed.options.reasoning ?? defaultReasoningEffort(provider, parsed.modelId);
       if (effectiveReasoning === "none" && supportsExplicitThinkingDisable(parsed.modelId)) {
         body.thinking = { type: "disabled" };
@@ -1050,7 +1055,24 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
           // always exceeds the budget within a model-safe ceiling, reserving room for visible output.
           const maxOut = parsed.options.maxOutputTokens ?? omittedMaxTokens;
           const wantBudget = reasoningBudget(effectiveReasoning);
-          const maxTokens = Math.min(REASONING_MAX_TOKENS_CEILING, Math.max(maxOut, wantBudget + OUTPUT_HEADROOM));
+          // Clamp to what the TARGET can emit, not to a flat 32k. REASONING_MAX_TOKENS_CEILING
+          // dates from Claude 4.x models that really stopped near 32k; Opus 4.6 and Sonnet 4.6
+          // document 128K and Haiku 4.5 64K, so the flat ceiling cut an explicit caller
+          // `max_tokens` to a quarter of what the model supports — the adaptive branch above
+          // honours the caller's figure, and this one did not.
+          //
+          // `configuredMaxOut` only ever RAISES this ceiling. It is two different things at once:
+          // a capability statement on the canonical Anthropic entries (documented Messages maxima)
+          // and a plain fallback budget for omitted requests anywhere else. Letting it lower the
+          // ceiling would read an operator's cheap `defaultMaxOutputTokens: 8192` as "this model
+          // cannot emit more" and clamp an explicit 128000 request to 8192 — below what this path
+          // sent before and with the thinking budget squeezed to 4096. Taking the larger of the two
+          // keeps the historical ceiling as a floor, so a low fallback budget cannot regress a
+          // caller who asked for more.
+          const statedCeiling = typeof configuredMaxOut === "number" && configuredMaxOut > 0
+            ? Math.max(configuredMaxOut, REASONING_MAX_TOKENS_CEILING)
+            : REASONING_MAX_TOKENS_CEILING;
+          const maxTokens = Math.min(statedCeiling, Math.max(maxOut, wantBudget + OUTPUT_HEADROOM));
           const budget = Math.max(MIN_THINKING_BUDGET, Math.min(wantBudget, maxTokens - OUTPUT_FLOOR));
           body.max_tokens = maxTokens;
           body.thinking = { type: "enabled", budget_tokens: budget };
@@ -1061,7 +1083,7 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
       }
 
       if (rejectsSamplingParameters(parsed.modelId)) {
-        // Opus 4.7+, Sonnet 5+ and Fable 400 on any non-default sampling parameter, with or without
+        // Opus 4.7+, Sonnet 5+, Haiku 5.5+ and Fable 400 on non-default sampling, with or without
         // thinking (anthropic-model-contract.ts).
         delete body.temperature;
         delete body.top_p;
@@ -1345,7 +1367,7 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
               }
               case "message_stop": {
                 yield* emitDone();
-                break;
+                return;
               }
               case "ping": {
                 // A data-only `{"type":"ping"}` record carries no SSE `event:` line, so the

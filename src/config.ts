@@ -11,6 +11,7 @@ import {
 import { refreshConfigDerivedRegistries } from "./config/derived-registries";
 import {
   clearPendingConfigDeletions,
+  recordFileBackedConfig,
   projectConfigRebaseProvenance,
 } from "./config/rebase-provenance";
 import { getConfigDir, getConfigPath, hardenConfigDir } from "./config/paths";
@@ -171,6 +172,7 @@ import {
   sanitizeModelDisplayNamesForLoad,
   sanitizeAutoReviewForLoad,
   sanitizeRetryOn429ForLoad,
+  sanitizeAnthropicSidecarInstanceForLoad,
   sanitizeModelCostsForLoad,
   sanitizeCapabilityDeclarationsForLoad,
   warnInheritedFastWireConflicts,
@@ -225,6 +227,7 @@ export function loadConfig(): OcxConfig {
     sanitizeModelDisplayNamesForLoad(parsed);
     sanitizeAutoReviewForLoad(parsed);
     sanitizeRetryOn429ForLoad(parsed);
+    sanitizeAnthropicSidecarInstanceForLoad(parsed);
     sanitizeModelCostsForLoad(parsed);
     sanitizeCapabilityDeclarationsForLoad(parsed);
     const result = configSchema.safeParse(parsed);
@@ -249,7 +252,7 @@ export function loadConfig(): OcxConfig {
       warnDegradedCatalogAutoRefresh(parsed);
       warnDegradedCodexPool(parsed);
       warnDegradedCredentialGroups(parsed);
-      return withRefreshedCostOverlays(normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, parsed), parsed));
+      return recordFileBackedConfig(withRefreshedCostOverlays(normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, parsed), parsed)), configPath);
     }
     // Only object-shaped configs are repairable. Spreading another JSON value
     // into defaults can manufacture a valid config and bypass the invalid-file
@@ -285,7 +288,7 @@ export function loadConfig(): OcxConfig {
       warnDegradedCatalogAutoRefresh(parsed);
       warnDegradedCodexPool(parsed);
       warnDegradedCredentialGroups(parsed);
-      return withRefreshedCostOverlays(normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, parsed), parsed));
+      return recordFileBackedConfig(withRefreshedCostOverlays(normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, parsed), parsed)), configPath);
     }
     // Still failing, but if every complaint is about one or more named entries
     // in an independent section, drop exactly those and keep the rest. Falling
@@ -315,7 +318,7 @@ export function loadConfig(): OcxConfig {
         warnDegradedCatalogAutoRefresh(parsed);
         warnDegradedCodexPool(parsed);
         warnDegradedCredentialGroups(parsed);
-        return withRefreshedCostOverlays(normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, parsed), parsed));
+        return recordFileBackedConfig(withRefreshedCostOverlays(normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, parsed), parsed)), configPath);
       }
     }
     // Merge couldn't fix it — truly broken config

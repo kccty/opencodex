@@ -21,7 +21,7 @@ import {
   registryModelIdKeys,
 } from "../../src/providers/registry/model-ids";
 import type { ProviderRegistryEntry } from "../../src/providers/registry/types";
-import { META_MUSE_MODELS } from "../../src/providers/registry/model-seeds";
+import { META_MODEL_API_MODELS } from "../../src/providers/registry/model-seeds";
 import { FREE_PROVIDER_DIRECTORY } from "../../src/providers/free-directory";
 import { applyProviderConfigHints } from "../../src/codex/catalog";
 import { routeModel } from "../../src/router";
@@ -44,7 +44,7 @@ const EXPECTED_KEY_PROVIDER_IDS = [
   "deepseek", "cerebras", "chutes", "deepinfra", "hyperbolic", "nscale", "vultr", "jev", "baseten", "commandcode", "sambanova", "nebius", "crusoe", "digitalocean", "scaleway", "featherless", "novita", "together", "fireworks", "firepass", "moonshot",
   "huggingface", "nvidia", "venice", "zai", "zhipu-bigmodel", "zhipu-bigmodel-coding", "zhipu-bigmodel-responses", "nanogpt", "synthetic", "siliconflow", "qwen-cloud", "tencent-coding-plan",
   "volcengine", "volcengine-coding-plan", "volcengine-agent-plan", "qianfan", "alibaba", "alibaba-token-plan", "alibaba-token-plan-intl", "parallel", "zenmux", "litellm", "ollama-cloud", "mistral",
-  "minimax", "minimax-cn", "kimi-code", "opencode-zen", "vercel-ai-gateway", "opper", "tokenlab",
+  "minimax", "minimax-cn", "kimi-code", "opencode-zen", "vercel-ai-gateway", "opper", "opengateway", "tokenlab", "modelflare",
   "opencode-free", "xiaomi", "xiaomi-mimo", "kilo", "mimo-free", "mimo", "cloudflare-ai-gateway", "cloudflare-workers-ai", "gitlab-duo",
   "qoder", "qoder-cn", "codebuddy", "codebuddy-cn", "stepfun", "claude-cli",
 ];
@@ -175,7 +175,7 @@ describe("provider registry parity", () => {
     // effort maps. The helper never reads models, so recovering them here is evidence the maps
     // were read. Compared against the seed the entry is built from rather than a copied literal,
     // so adding a Muse model does not fail this case for the wrong reason.
-    expect(registryModelIdKeys(metaMuse)).toEqual([...META_MUSE_MODELS]);
+    expect(registryModelIdKeys(metaMuse)).toEqual([...META_MODEL_API_MODELS]);
   });
 
   test("key-login export is derived from the registry", () => {
@@ -491,12 +491,14 @@ describe("provider registry parity", () => {
     });
 
     const minimaxModels = [
+      "MiniMax-M3.1-Flash-Preview",
       "MiniMax-M3",
       "MiniMax-M2.7", "MiniMax-M2.7-highspeed",
       "MiniMax-M2.5", "MiniMax-M2.5-highspeed",
       "MiniMax-M2.1", "MiniMax-M2.1-highspeed",
       "MiniMax-M2",
     ];
+    const splitModels = minimaxModels.slice(1);
     for (const providerId of ["minimax", "minimax-cn"]) {
       const entry = PROVIDER_REGISTRY.find(provider => provider.id === providerId);
       expect(entry?.adapter).toBe("openai-chat");
@@ -504,14 +506,18 @@ describe("provider registry parity", () => {
       expect(entry?.defaultModel).toBe("MiniMax-M3");
       expect(entry?.models).toEqual(minimaxModels);
       expect(entry?.modelContextWindows?.["MiniMax-M3"]).toBe(1_000_000);
+      expect(entry?.modelContextWindows?.["MiniMax-M3.1-Flash-Preview"]).toBe(1_000_000);
       expect(entry?.modelReasoningEfforts?.["MiniMax-M3"]).toEqual(["low", "medium", "high", "xhigh", "max"]);
+      expect(entry?.modelReasoningEfforts?.["MiniMax-M3.1-Flash-Preview"]).toEqual(["low", "medium", "high", "xhigh", "max"]);
       expect(entry?.modelDefaultReasoningEfforts?.["MiniMax-M3"]).toBe("medium");
+      expect(entry?.modelDefaultReasoningEfforts?.["MiniMax-M3.1-Flash-Preview"]).toBe("max");
       expect(entry?.modelReasoningEffortMap?.["MiniMax-M3"]).toMatchObject({ low: "disabled", medium: "adaptive", high: "adaptive" });
+      expect(entry?.modelReasoningEffortMap?.["MiniMax-M3.1-Flash-Preview"]).toBeUndefined();
       expect(entry?.preserveReasoningContentModels).toEqual(minimaxModels);
-      expect(entry?.reasoningSplitModels).toEqual(minimaxModels);
-      expect(entry?.reasoningDetailsModels).toEqual(minimaxModels);
+      expect(entry?.reasoningSplitModels).toEqual(splitModels);
+      expect(entry?.reasoningDetailsModels).toEqual(splitModels);
       expect(entry?.thinkingToggleModels).toEqual(["MiniMax-M3"]);
-      for (const modelId of minimaxModels.slice(1)) {
+      for (const modelId of minimaxModels.slice(2)) {
         expect(entry?.modelContextWindows?.[modelId]).toBe(204_800);
       }
     }
@@ -1170,10 +1176,10 @@ describe("provider registry parity", () => {
   test("base URL override permission is registry-only and limited to opted-in providers", () => {
     const optedIn = PROVIDER_REGISTRY.filter(entry => entry.allowBaseUrlOverride);
 
-    // Registry order. Both OAuth entries (anthropic, google-antigravity) are gated by
+    // Registry order. OAuth entries, including both Anthropic instances, are gated by
     // providerSecureTransportConfigError; the rest are key/local providers that never send a
     // subscription bearer to the override.
-    expect(optedIn.map(entry => entry.id)).toEqual(["orcarouter-oauth", "anthropic", "google-antigravity", "ollama", "vllm", "lm-studio", "moonshot", "qwen-cloud", "alibaba", "alibaba-token-plan-intl", "litellm"]);
+    expect(optedIn.map(entry => entry.id)).toEqual(["orcarouter-oauth", "anthropic", "anthropic2", "google-antigravity", "ollama", "vllm", "lm-studio", "moonshot", "qwen-cloud", "alibaba", "alibaba-token-plan-intl", "litellm"]);
     for (const entry of optedIn) {
       expect(providerConfigSeed(entry)).not.toHaveProperty("allowBaseUrlOverride");
     }
@@ -1331,14 +1337,9 @@ describe("provider registry parity", () => {
     expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.liveModels).toBe(true);
     expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.defaultModel).toBe("gemini-3.8-flash");
     // Collapsed picker: base models only, no effort-suffix variants.
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toContain("gemini-3.7-flash");
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toContain("gemini-3.1-pro");
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toContain("claude-sonnet-4-6");
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toContain("claude-opus-4-6-thinking");
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toContain("gpt-oss-120b-medium");
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toContain("gemini-3.1-flash-image");
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toContain("gemini-3.8-flash");
-    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toHaveLength(7);
+    expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.models).toEqual([
+      "gemini-3.8-flash", "gemini-4-argon", "claude-opus-5-5", "claude-sonnet-5-5",
+    ]);
     // Effort ladders on collapsed base models.
     expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.modelReasoningEfforts?.["gemini-3.8-flash"]).toEqual(["low", "medium", "high"]);
     expect(OAUTH_PROVIDERS["google-antigravity"].providerConfig.modelReasoningEfforts?.["gemini-3.7-flash"]).toEqual(["low", "medium", "high"]);
@@ -1402,7 +1403,7 @@ describe("provider registry parity", () => {
   test("GUI preset projection preserves current featured set plus key catalog and custom", () => {
     const featured = deriveFeaturedProviderIds();
     expect(featured).toEqual([
-      "openai", "xai", "command-code", "orcarouter-oauth", "anthropic", "anthropic-apikey", "kimi", "nous", "openai-apikey", "umans", "opencode-go", "openrouter",
+      "openai", "xai", "command-code", "orcarouter-oauth", "anthropic", "anthropic2", "anthropic-apikey", "kimi", "nous", "openai-apikey", "umans", "opencode-go", "openrouter",
       "groq", "google", "azure-openai", "ollama", "vllm", "lm-studio", "opencode-free",
       "mimo-free",
     ]);
@@ -1469,6 +1470,7 @@ describe("provider registry parity", () => {
     expect(deriveJawcodeAliases()).toEqual({
       xai: "xai",
       anthropic: "anthropic",
+      anthropic2: "anthropic",
       "anthropic-apikey": "anthropic",
       "anthropic-key": "anthropic",
       kimi: "moonshot",

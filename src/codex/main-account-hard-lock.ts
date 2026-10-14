@@ -1,6 +1,6 @@
 import type { OcxConfig } from "../types";
 import { getMainPolicyQuota } from "./quota";
-import { MAIN_ACCOUNT_HARD_LOCK_PERCENT } from "./quota-types";
+import { MAIN_ACCOUNT_HARD_LOCK_PERCENT, MAIN_ACCOUNT_HARD_LOCK_SHORT_PERCENT, MAIN_ACCOUNT_HARD_LOCK_MIN_PERCENT } from "./quota-types";
 
 export { MAIN_ACCOUNT_HARD_LOCK_PERCENT };
 
@@ -9,9 +9,19 @@ export interface MainAccountHardLockStatus {
   state: "off" | "unknown" | "ready" | "blocked";
   /** Unix milliseconds; absent when a blocking observation has no future reset. */
   resetAt?: number;
+  thresholds: { short: number; long: number };
+  window?: "short" | "long";
 }
 
-type PolicyConfig = Pick<OcxConfig, "codexMainAccountHardLock">;
+type PolicyConfig = Pick<OcxConfig, "codexMainAccountHardLock" | "codexMainAccountHardLockThresholds">;
+
+export function resolveMainAccountHardLockThresholds(config: PolicyConfig | undefined): { short: number; long: number } {
+  const valid = (value: unknown, fallback: number): number => typeof value === "number"
+    && Number.isInteger(value) && value >= MAIN_ACCOUNT_HARD_LOCK_MIN_PERCENT && value <= 100 ? value : fallback;
+  const long = valid(config?.codexMainAccountHardLockThresholds?.long, MAIN_ACCOUNT_HARD_LOCK_PERCENT);
+  const short = valid(config?.codexMainAccountHardLockThresholds?.short, MAIN_ACCOUNT_HARD_LOCK_SHORT_PERCENT);
+  return { short: Math.min(short, long), long };
+}
 
 /**
  * Whether the main-account hard lock applies to this config (#5694).
@@ -31,11 +41,17 @@ function resetTimestamp(value: number | undefined): number | undefined {
   return value < 10_000_000_000 ? value * 1000 : value;
 }
 
-type WindowReading = { percent: number | undefined; resetAt: number | undefined; burn?: number };
+type WindowReading = {
+  kind: "short" | "long";
+  percent: number | undefined;
+  resetAt: number | undefined;
+  /** Decayed one-observation short-window burn; only the short window carries it. */
+  burn?: number;
+};
 
 /**
  * The windows that govern the lock. The 5h and weekly windows each govern on their own, so either
- * one at 98% blocks even while the other has headroom. Monthly governs only a monthly-only account:
+ * one at its configured threshold blocks even while the other has headroom. Monthly governs only a monthly-only account:
  * supplementary monthly data on a 5h/weekly account never becomes a lock. The list is never empty,
  * so a record with no readings at all classifies as unknown rather than vacuously ready.
  */
@@ -45,10 +61,11 @@ function governingWindows(quota: NonNullable<ReturnType<typeof getMainPolicyQuot
   const hasWeekly = quota.weeklyPercent !== undefined || quota.weeklyResetAt !== undefined;
   const windows: WindowReading[] = [];
   if (hasShort) {
-    windows.push({ percent: quota.shortPercent, resetAt: quota.shortResetAt, burn: quota.shortBurnPerRequestPercent });
+    windows.push({ kind: "short", percent: quota.shortPercent, resetAt: quota.shortResetAt,
+      burn: quota.shortBurnPerRequestPercent });
   }
-  if (hasWeekly) windows.push({ percent: quota.weeklyPercent, resetAt: quota.weeklyResetAt });
-  if (windows.length === 0) windows.push({ percent: quota.monthlyPercent, resetAt: quota.monthlyResetAt });
+  if (hasWeekly) windows.push({ kind: "long", percent: quota.weeklyPercent, resetAt: quota.weeklyResetAt });
+  if (windows.length === 0) windows.push({ kind: "long", percent: quota.monthlyPercent, resetAt: quota.monthlyResetAt });
   return windows;
 }
 
@@ -62,28 +79,29 @@ export function getMainAccountHardLockStatus(
   config: PolicyConfig,
   now = Date.now(),
 ): MainAccountHardLockStatus {
-  if (!isMainAccountHardLockEnabled(config)) return { enabled: false, state: "off" };
+  const thresholds = resolveMainAccountHardLockThresholds(config);
+  if (!isMainAccountHardLockEnabled(config)) return { enabled: false, state: "off", thresholds };
   const quota = getMainPolicyQuota();
-  if (!quota) return { enabled: true, state: "unknown" };
+  if (!quota) return { enabled: true, state: "unknown", thresholds };
   const windows = governingWindows(quota);
-  // The static gate reacts to a reading that already crossed 95. The reserve projects the next
-  // one: when the decayed per-observation burn estimate says the next response can finish the
-  // window (percent + burn >= 100), waiting for the raw percent to reach 95 is the same jump
-  // blindness that carried 97 straight to 100 past the old 98 gate.
+  // The static gate reacts to a reading that already crossed its window threshold. The reserve
+  // projects the next one: when the decayed per-observation burn estimate says the next response
+  // can finish the short window (percent + burn >= 100), waiting for the raw percent to cross the
+  // threshold is the same jump blindness that carried 97 straight to 100 past the old 98 gate.
   const blocking = windows.filter(w => validPercent(w.percent)
-    && (w.percent >= MAIN_ACCOUNT_HARD_LOCK_PERCENT
-      || (validPercent(w.burn) && w.percent + w.burn >= 100)));
+    && (w.percent >= thresholds[w.kind]
+      || (w.kind === "short" && validPercent(w.burn) && w.percent + w.burn >= 100)));
   if (blocking.length > 0) {
-    // The lock holds until every blocking window reads lower, so the earliest possible unlock is
+    // The lock holds until every blocking window reads lower or is authoritatively absent, so the earliest possible unlock is
     // the latest blocking reset. One blocking window without a future reset makes it unknowable.
-    // A predicted reset is not evidence of recovery either way: only a fresh lower reading releases.
+    // A predicted reset is not evidence of recovery; fresh lower usage or validated WHAM absence releases.
     const resets = blocking.map(w => resetTimestamp(w.resetAt));
     const resetAt = resets.every(r => r !== undefined && r > now) ? Math.max(...(resets as number[])) : undefined;
-    return { enabled: true, state: "blocked", ...(resetAt !== undefined ? { resetAt } : {}) };
+    return { enabled: true, state: "blocked", thresholds, window: blocking[0]!.kind, ...(resetAt !== undefined ? { resetAt } : {}) };
   }
   // Unknown admits, so an unreadable window never hides a blocking one and never blocks alone.
-  if (windows.some(w => !validPercent(w.percent))) return { enabled: true, state: "unknown" };
-  return { enabled: true, state: "ready" };
+  if (windows.some(w => !validPercent(w.percent))) return { enabled: true, state: "unknown", thresholds };
+  return { enabled: true, state: "ready", thresholds };
 }
 
 export function isMainAccountHardLocked(config: PolicyConfig, now = Date.now()): boolean {

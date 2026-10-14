@@ -1,3 +1,4 @@
+import { CODEX_INTERNAL_OPENAI_MODELS } from "./codex/control-plane-models";
 import type { CodexAccountMode, OcxConfig, OcxProviderConfig } from "./types";
 import { createHash } from "node:crypto";
 import { peekAuthStore } from "./oauth/store";
@@ -12,6 +13,7 @@ import {
 } from "./combos";
 import type { NormalizedComboConfig } from "./combos/types";
 import { hasOwnProvider } from "./config/provider-name";
+import { anthropicInstanceRowShapeMatches } from "./providers/anthropic-instance-id";
 import { providerUsesKeyAuthOverride, resolveProviderApiKey } from "./providers/key-store";
 import { captureProviderApiKeySelection } from "./providers/api-key-selection-capture";
 import { assertProviderDestinationAllowed } from "./lib/destination-policy";
@@ -53,6 +55,14 @@ import { evaluatePolicyProfile, type PolicyRequestEvidence } from "./routing/eva
 import { assemblePolicyCandidateEvidence } from "./routing/compatibility/assemble";
 import { resolveModelPolicy, type ResolvedModelPolicy } from "./providers/resolved-model-policy";
 
+/** Explicit Pool 2 admission refusal; ingress must not recover it through default routing. */
+export class AnthropicSecondaryInstanceUnavailableError extends Error {
+  constructor() {
+    super("Anthropic Pool 2 requires an enabled configured provider with valid OAuth ownership");
+    this.name = "AnthropicSecondaryInstanceUnavailableError";
+  }
+}
+
 export class UnknownRoutingPolicyError extends Error {
   constructor(readonly profileId: string) {
     super(`Unknown routing policy: ${profileId}`);
@@ -89,6 +99,12 @@ export interface RouteResult {
   combo?: ComboPick;
   /** Bounded route-decision trace (RI-01); never contains secrets. */
   routeDecision?: RouteDecisionTraceV1;
+  /**
+   * Full eligible provider/model membership from a policy evaluation, keyed
+   * "provider\u0000model". The trace's candidate list is bounded; fallback
+   * redirect checks need membership for eligible rows that were truncated out.
+   */
+  policyEligibility?: ReadonlySet<string>;
   /**
    * Set when a blocked-model redirect moved the request to a different
    * provider. Caller credentials addressed to the source route must not follow
@@ -420,6 +436,12 @@ export function routedProviderConfig(providerName: string, provider: OcxProvider
     ...(provider.preserveResponsesReasoningContent === undefined && registryEntry.preserveResponsesReasoningContent !== undefined
       ? { preserveResponsesReasoningContent: registryEntry.preserveResponsesReasoningContent }
       : {}),
+    ...(provider.preserveResponsesInputItemIds === undefined && registryEntry.preserveResponsesInputItemIds !== undefined
+      ? { preserveResponsesInputItemIds: registryEntry.preserveResponsesInputItemIds }
+      : {}),
+    ...(provider.preserveResponsesMessageMetadata === undefined && registryEntry.preserveResponsesMessageMetadata !== undefined
+      ? { preserveResponsesMessageMetadata: registryEntry.preserveResponsesMessageMetadata }
+      : {}),
     ...(provider.dropResponsesReasoningItems === undefined && registryEntry.dropResponsesReasoningItems !== undefined
       ? { dropResponsesReasoningItems: registryEntry.dropResponsesReasoningItems }
       : {}),
@@ -509,9 +531,18 @@ export function routedProviderConfig(providerName: string, provider: OcxProvider
   return resolved;
 }
 
+/**
+ * Rows eligible for bare-model inference (configured default model, model list, model alias).
+ *
+ * The marked builtin Pool 2 row is excluded: it seeds the same catalog as `anthropic`, so letting it
+ * compete would move a bare `claude-*` request onto Pool 2 by insertion order, or make a shared alias
+ * ambiguous. Pool 2 is reached only through `anthropic2/<model>`, its provider alias, or an explicit
+ * `defaultProvider`. An unmarked custom row named `anthropic2` keeps its ordinary custom meaning.
+ */
 function activeProviderEntries(config: OcxConfig): [string, OcxProviderConfig][] {
   return Object.entries(config.providers)
-    .filter(([name, provider]) => name !== LEGACY_CHATGPT_PROVIDER_ID && provider.disabled !== true);
+    .filter(([name, provider]) => name !== LEGACY_CHATGPT_PROVIDER_ID && provider.disabled !== true
+      && !(name === "anthropic2" && anthropicInstanceRowShapeMatches(name, provider)));
 }
 
 export class NoEnabledOpenAiProviderError extends Error {
@@ -552,9 +583,6 @@ export function comboRouteDecisionTrace(
   });
 }
 
-// Codex uses a small number of control-plane model ids that are not part of the public GPT/o
-// naming families. Keep this exact: a broad `codex-*` rule could capture a third-party model.
-const CODEX_INTERNAL_OPENAI_MODELS = new Set(["codex-auto-review"]);
 const MAX_BLOCKED_MODEL_REDIRECT_EDGES = 5;
 
 interface BlockedModelRedirectState {
@@ -608,6 +636,9 @@ function routeResult(
   routeReason: string,
   redirectState: BlockedModelRedirectState,
 ): RouteResult {
+  if (providerName === "anthropic2" && provider.authMode === "oauth" && !anthropicInstanceRowShapeMatches(providerName, provider)) {
+    throw new AnthropicSecondaryInstanceUnavailableError();
+  }
   const qualified = resolveBlockedModelRedirect(config, `${providerName}/${modelId}`);
   const bare = resolveBlockedModelRedirect(config, modelId);
   const crossTarget = config && (
@@ -733,6 +764,9 @@ function routeModelInternal(
       ...routed,
       routeKind: "policy" as const,
       routeReason: routed.routeReason === "blocked-model-redirect" ? "blocked-model-redirect" : "policy-selected",
+      policyEligibility: new Set(evaluation.candidates
+        .filter(candidate => candidate.eligible)
+        .map(candidate => candidate.provider + "\u0000" + candidate.model)),
       routeDecision: {
         ...evaluation.trace,
         selected: {
@@ -798,6 +832,11 @@ function routeModelInternal(
   if (slash > 0) {
     const requestedProvider = modelId.slice(0, slash);
     const requestedLower = requestedProvider.toLowerCase();
+    // Literal B is a reserved instance selector even before its row exists. Keep other
+    // qualifiers, including exact uppercase custom keys, on the ordinary routing path.
+    if (requestedProvider === "anthropic2" && !hasOwnProvider(config.providers, requestedProvider)) {
+      throw new AnthropicSecondaryInstanceUnavailableError();
+    }
     let provName: string | undefined;
 
     if (hasOwnProvider(config.providers, requestedProvider)) {

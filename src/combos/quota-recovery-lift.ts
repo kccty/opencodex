@@ -1,5 +1,6 @@
 import { isCompleteCodexQuotaRecoverySnapshot } from "../codex/quota";
-import { MAIN_ACCOUNT_HARD_LOCK_PERCENT, type StoredAccountQuota } from "../codex/quota-types";
+import { type StoredAccountQuota } from "../codex/quota-types";
+import { resolveMainAccountHardLockThresholds } from "../codex/main-account-hard-lock";
 import { clearComboTargetCooldownsForProvider } from "./failover";
 
 /** The provider lane a Codex account quota observation speaks for. */
@@ -23,7 +24,7 @@ export function liftCodexLaneComboCooldowns(quota: StoredAccountQuota | null): n
   // answers both "is this a real reading" and "is the account healthy".
   if (!isCompleteCodexQuotaRecoverySnapshot(quota)) return 0;
   // The recovery predicate refuses only a >=100 reading, while admission cuts the account off
-  // at 95 — earlier once per-request burn is projected. Lifting inside that band hands combos a
+  // at its window thresholds — earlier once per-request burn is projected. Lifting inside that band hands combos a
   // lane that cannot serve: the next send is refused locally and simply re-cools the target.
   if (insideMainAccountHardLockBand(quota)) return 0;
   return clearComboTargetCooldownsForProvider(CODEX_LANE_PROVIDER);
@@ -32,11 +33,16 @@ export function liftCodexLaneComboCooldowns(quota: StoredAccountQuota | null): n
 /** The same band admission refuses: the static gate, or its burn projection, on any window. */
 function insideMainAccountHardLockBand(quota: StoredAccountQuota | null): boolean {
   if (!quota) return false;
-  const governing = [quota.shortPercent, quota.weeklyPercent,
+  // The lift gate has no config context, so it mirrors the default per-window thresholds.
+  const thresholds = resolveMainAccountHardLockThresholds(undefined);
+  const governing: Array<{ kind: "short" | "long"; percent: number | undefined }> = [
+    { kind: "short", percent: quota.shortPercent },
+    { kind: "long", percent: quota.weeklyPercent },
     ...(quota.shortPercent === undefined && quota.weeklyPercent === undefined
-      ? [quota.monthlyPercent] : [])];
-  if (governing.some(value => typeof value === "number" && Number.isFinite(value)
-    && value >= MAIN_ACCOUNT_HARD_LOCK_PERCENT)) return true;
+      ? [{ kind: "long" as const, percent: quota.monthlyPercent }] : []),
+  ];
+  if (governing.some(w => typeof w.percent === "number" && Number.isFinite(w.percent)
+    && w.percent >= thresholds[w.kind])) return true;
   return typeof quota.shortPercent === "number" && Number.isFinite(quota.shortPercent)
     && typeof quota.shortBurnPerRequestPercent === "number" && Number.isFinite(quota.shortBurnPerRequestPercent)
     && quota.shortPercent + quota.shortBurnPerRequestPercent >= 100;

@@ -143,9 +143,7 @@ describe("quota auto-refresh native-main admission", () => {
     writeMain(bearer(true));
     const cached = getAccountQuota(MAIN);
     if (!cached) throw new Error("Expected cached main quota");
-    // Idle snapshot: an active one triggers the scheduled-window percent re-read cadence,
-    // whose refresh calls this token-preparation test does not model.
-    cached.updatedAt = now - 45 * 60_000;
+    cached.updatedAt = now - 300_000;
     if (missingDeadline) delete cached.shortResetAt;
     const fresh = bearer();
     const calls = installFetch(async (url, init) => {
@@ -180,7 +178,7 @@ describe("quota auto-refresh native-main admission", () => {
         "x-codex-primary-window-minutes": "300",
         "x-codex-primary-reset-at": String(RESET_SECONDS + 18_000),
       } }));
-      const run = runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+      const run = runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
       try {
         await Promise.race([entered.promise, run.then(() => { throw new Error("SSE was never reached"); })]);
         const workspace = change === "workspace" ? "fixture-replacement-workspace" : accountId;
@@ -215,7 +213,7 @@ describe("quota auto-refresh native-main admission", () => {
     const entered = deferred<void>();
     const response = deferred<Response>();
     installFetch(async () => { entered.resolve(); return response.promise; });
-    const run = runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+    const run = runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
     try {
       await Promise.race([entered.promise, run.then(() => { throw new Error("Inference was never reached"); })]);
       writeMain("fixture-replacement-token");
@@ -246,8 +244,9 @@ describe("quota auto-refresh native-main admission", () => {
     const token = spyOn(mainAccount, "getValidMainAccountToken");
     const calls = installFetch(async () => completedResponse());
     try {
-      await runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
-      expect(getMainAccountHardLockStatus(cfg)).toEqual({ enabled: true, state: "blocked" });
+      await runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
+      expect(getMainAccountHardLockStatus(cfg)).toEqual({ enabled: true, state: "blocked",
+        thresholds: { short: 90, long: 98 }, window: "short" });
       expect(token).not.toHaveBeenCalled();
       expect(calls).toEqual([]);
       expect(cfg.codexQuotaAutoRefresh?.[MAIN]).toEqual({ fiveHour: true, weekly: true });
@@ -255,7 +254,7 @@ describe("quota auto-refresh native-main admission", () => {
     } finally { token.mockRestore(); }
     writeMain();
     observe(0);
-    await runCodexQuotaAutoRefresh(cfg, now + 1, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+    await runCodexQuotaAutoRefresh(cfg, now + 1, { persistCompleted: recordMarkers });
     expect(calls).toEqual([responsesUrl]);
     expect(cfg.codexQuotaAutoRefresh?.[MAIN]?.lastWeeklyResetAt).toBe(RESET_MILLISECONDS);
   });
@@ -267,13 +266,13 @@ describe("quota auto-refresh native-main admission", () => {
     setAccountQuotaFromParsed("pool-a", { weeklyPercent: 0, weeklyResetAt: RESET_SECONDS });
     observe(99);
     const warmed: string[] = [];
-    await runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, warmAccount: async (_cfg, id) => { warmed.push(id); }, persistCompleted: recordMarkers });
+    await runCodexQuotaAutoRefresh(cfg, now, { warmAccount: async (_cfg, id) => { warmed.push(id); }, persistCompleted: recordMarkers });
     expect(warmed).toEqual(["pool-a"]);
     expect(cfg.codexQuotaAutoRefresh?.[MAIN]).toEqual({ fiveHour: true, weekly: true });
     expect(cfg.codexQuotaAutoRefresh?.["pool-a"]?.lastWeeklyResetAt).toBe(RESET_MILLISECONDS);
     observe(0);
     const calls = installFetch(async () => completedResponse());
-    await runCodexQuotaAutoRefresh(cfg, now + 1, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+    await runCodexQuotaAutoRefresh(cfg, now + 1, { persistCompleted: recordMarkers });
     expect(calls).toEqual([responsesUrl]);
     expect(cfg.codexQuotaAutoRefresh?.[MAIN]).toMatchObject({ lastFiveHourResetAt: RESET_MILLISECONDS, lastWeeklyResetAt: RESET_MILLISECONDS });
     expect(getNativeMainProfileRequestCount()).toBe(0);
@@ -288,7 +287,7 @@ describe("quota auto-refresh native-main admission", () => {
       models.push(JSON.parse(String(init?.body)).model);
       return models.length === 1 ? new Response(null, { status: 400 }) : completedResponse();
     });
-    await runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+    await runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
     expect(calls).toEqual([responsesUrl, responsesUrl]);
     expect(models).toEqual(["gpt-5.6-luna", "gpt-5.5"]);
     expect(cfg.codexQuotaAutoRefresh?.[MAIN]?.lastWeeklyResetAt).toBe(RESET_MILLISECONDS);
@@ -312,7 +311,7 @@ describe("quota auto-refresh native-main admission", () => {
       return completedResponse();
     });
     try {
-      await runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+      await runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
       expect(calls).toEqual([tokenUrl, responsesUrl]);
       expect(order).toEqual(["refresh", "shared", "inference"]);
       expect(cfg.codexQuotaAutoRefresh?.[MAIN]?.lastWeeklyResetAt).toBe(RESET_MILLISECONDS);
@@ -331,7 +330,7 @@ describe("quota auto-refresh native-main admission", () => {
       entered.resolve();
       return response.promise;
     });
-    const run = runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+    const run = runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
     try {
       await Promise.race([entered.promise, run.then(() => { throw new Error("Token endpoint was never reached"); })]);
       if (restriction === "policy") observe(99);
@@ -349,7 +348,7 @@ describe("quota auto-refresh native-main admission", () => {
     observe(0);
     cfg.pausedCodexAccountIds = [];
     clearAccountNeedsReauth(MAIN);
-    await runCodexQuotaAutoRefresh(cfg, now + 1, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+    await runCodexQuotaAutoRefresh(cfg, now + 1, { persistCompleted: recordMarkers });
     expect(calls).toEqual([tokenUrl, responsesUrl]);
     expect(cfg.codexQuotaAutoRefresh?.[MAIN]?.lastWeeklyResetAt).toBe(RESET_MILLISECONDS);
   });
@@ -366,7 +365,7 @@ describe("quota auto-refresh native-main admission", () => {
     });
     const calls = installFetch(async () => completedResponse());
     try {
-      await runCodexQuotaAutoRefresh(cfg, now, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+      await runCodexQuotaAutoRefresh(cfg, now, { persistCompleted: recordMarkers });
       expect(calls).toEqual([]);
       expect(cfg.codexQuotaAutoRefresh?.[MAIN]).toEqual({ fiveHour: true, weekly: true });
       expect(getNativeMainProfileRequestCount()).toBe(0);
@@ -375,7 +374,7 @@ describe("quota auto-refresh native-main admission", () => {
     observe(0);
     cfg.pausedCodexAccountIds = [];
     clearAccountNeedsReauth(MAIN);
-    await runCodexQuotaAutoRefresh(cfg, now + 1, { refreshQuota: async () => {}, persistCompleted: recordMarkers });
+    await runCodexQuotaAutoRefresh(cfg, now + 1, { persistCompleted: recordMarkers });
     expect(calls).toEqual([responsesUrl]);
     expect(cfg.codexQuotaAutoRefresh?.[MAIN]?.lastWeeklyResetAt).toBe(RESET_MILLISECONDS);
   });

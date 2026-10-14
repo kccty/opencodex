@@ -35,8 +35,13 @@ import {
   ZAI_GLM_5X_REASONING_EFFORTS,
   MINIMAX_MODELS,
   MINIMAX_MODEL_CONTEXT_WINDOWS,
+  MINIMAX_MODEL_INPUT_MODALITIES,
   MINIMAX_M3_REASONING_EFFORTS,
   MINIMAX_M3_REASONING_EFFORT_MAP,
+  MINIMAX_M31_FLASH_PREVIEW,
+  MINIMAX_M31_REASONING_EFFORTS,
+  MINIMAX_M31_DEFAULT_REASONING_EFFORT,
+  MINIMAX_REASONING_SPLIT_MODELS,
   THINKING_TOGGLE_EFFORTS,
   THINKING_TOGGLE_MAP,
   ZHIPU_BIGMODEL_MODELS,
@@ -1020,22 +1025,25 @@ export const PROVIDER_REGISTRY_EXTENDED: readonly ProviderRegistryEntry[] = [
     id: "minimax", label: "MiniMax — Coding Plan", baseUrl: "https://api.minimax.io/v1", adapter: "openai-chat", authKind: "key",
     dashboardUrl: "https://platform.minimax.io", defaultModel: "MiniMax-M3", models: MINIMAX_MODELS,
     modelContextWindows: MINIMAX_MODEL_CONTEXT_WINDOWS,
-    modelReasoningEfforts: { "MiniMax-M3": MINIMAX_M3_REASONING_EFFORTS },
-    modelDefaultReasoningEfforts: { "MiniMax-M3": "medium" },
+    modelInputModalities: MINIMAX_MODEL_INPUT_MODALITIES,
+    modelReasoningEfforts: { "MiniMax-M3": MINIMAX_M3_REASONING_EFFORTS, [MINIMAX_M31_FLASH_PREVIEW]: MINIMAX_M31_REASONING_EFFORTS },
+    modelDefaultReasoningEfforts: { "MiniMax-M3": "medium", [MINIMAX_M31_FLASH_PREVIEW]: MINIMAX_M31_DEFAULT_REASONING_EFFORT },
     modelReasoningEffortMap: { "MiniMax-M3": MINIMAX_M3_REASONING_EFFORT_MAP },
     preserveReasoningContentModels: MINIMAX_MODELS,
     // MiniMax-M3 low effort maps to thinking disabled, so a legitimate tool
     // round can carry no reasoning at all; only replay real recorded text,
     // never a fabricated placeholder (chatgpt-codex-connector P2 on #1205).
     requiresReasoningPlaceholderModels: [],
-    reasoningSplitModels: MINIMAX_MODELS,
+    // M3.1-Flash-Preview ignores reasoning_split and always answers with reasoning_content,
+    // so it stays off the split/details lists and replays as a reasoning_content string.
+    reasoningSplitModels: MINIMAX_REASONING_SPLIT_MODELS,
     // With reasoning_split the upstream returns thinking as a structured
     // reasoning_details array (cumulative text snapshots per stream chunk) and
     // requires that array back verbatim on the next turn — a reasoning_content
     // string replay is the native-format pass-back the docs say is unsupported.
     // Evidence: platform.minimax.io/docs/guides/text-m3-function-call and
     // /docs/api-reference/text-openai-api (verified 2026-09-01).
-    reasoningDetailsModels: MINIMAX_MODELS,
+    reasoningDetailsModels: MINIMAX_REASONING_SPLIT_MODELS,
     thinkingToggleModels: ["MiniMax-M3"],
     jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive", note: "Subscription Key or API Key",
   },
@@ -1043,13 +1051,14 @@ export const PROVIDER_REGISTRY_EXTENDED: readonly ProviderRegistryEntry[] = [
     id: "minimax-cn", label: "MiniMax — Coding Plan (CN)", baseUrl: "https://api.minimaxi.com/v1", adapter: "openai-chat", authKind: "key",
     dashboardUrl: "https://platform.minimaxi.com", defaultModel: "MiniMax-M3", models: MINIMAX_MODELS,
     modelContextWindows: MINIMAX_MODEL_CONTEXT_WINDOWS,
-    modelReasoningEfforts: { "MiniMax-M3": MINIMAX_M3_REASONING_EFFORTS },
-    modelDefaultReasoningEfforts: { "MiniMax-M3": "medium" },
+    modelInputModalities: MINIMAX_MODEL_INPUT_MODALITIES,
+    modelReasoningEfforts: { "MiniMax-M3": MINIMAX_M3_REASONING_EFFORTS, [MINIMAX_M31_FLASH_PREVIEW]: MINIMAX_M31_REASONING_EFFORTS },
+    modelDefaultReasoningEfforts: { "MiniMax-M3": "medium", [MINIMAX_M31_FLASH_PREVIEW]: MINIMAX_M31_DEFAULT_REASONING_EFFORT },
     modelReasoningEffortMap: { "MiniMax-M3": MINIMAX_M3_REASONING_EFFORT_MAP },
     preserveReasoningContentModels: MINIMAX_MODELS,
     requiresReasoningPlaceholderModels: [],
-    reasoningSplitModels: MINIMAX_MODELS,
-    reasoningDetailsModels: MINIMAX_MODELS,
+    reasoningSplitModels: MINIMAX_REASONING_SPLIT_MODELS,
+    reasoningDetailsModels: MINIMAX_REASONING_SPLIT_MODELS,
     thinkingToggleModels: ["MiniMax-M3"],
     jawcodeBundle: "minimax", metadataModelIdNormalize: "case-insensitive", note: "中国区 Subscription Key",
   },
@@ -1138,6 +1147,65 @@ export const PROVIDER_REGISTRY_EXTENDED: readonly ProviderRegistryEntry[] = [
     note: "EU-hosted AI gateway: one OpenAI-compatible endpoint and one key in front of 30+ providers. Bare model ids are pools (claude-sonnet-4-6, gpt-5.5) and Opper picks the route per request; vendor/model ids (anthropic/claude-sonnet-4-6) pin one provider. The catalogue is discovered live from /v3/compat/models with your key; the public list is at opper.ai/models. Token rates are the model providers' rates with no markup; Opper charges a 3% fee when you buy credits.",
   },
   {
+    // Sionic AI public contract and live streams/tools/images checked 2026-10-02:
+    // https://opengateway.ai/docs/reference/endpoints/models
+    // https://opengateway.ai/docs/reference/endpoints/responses
+    id: "opengateway",
+    label: "OpenGateway",
+    adapter: "openai-chat",
+    baseUrl: "https://apis.opengateway.ai/v1",
+    authKind: "key",
+    dashboardUrl: "https://opengateway.ai/api-keys",
+    liveModels: true,
+    // GET /v1/models is public and answers 200 for any Bearer value, so it cannot verify a key.
+    apiKeyValidation: "unknown",
+    preserveCustomDestination: true,
+    // Both cold-start seeds are active Sionic-served vision models with 1M context.
+    // GLM is the default, not a quality ranking: a verified, large-output coding seed.
+    defaultModel: "z-ai/glm-5.3-flash-ultrafast",
+    models: ["z-ai/glm-5.3-flash-ultrafast", "deepseek/deepseek-v4.1-flash-ultrafast", "openai/o3-pro"],
+    modelContextWindows: {
+      "z-ai/glm-5.3-flash-ultrafast": 1_000_000,
+      "deepseek/deepseek-v4.1-flash-ultrafast": 1_000_000,
+      "openai/o3-pro": 200_000,
+    },
+    modelMaxOutputTokens: { "z-ai/glm-5.3-flash-ultrafast": 131_072 },
+    modelInputModalities: {
+      "z-ai/glm-5.3-flash-ultrafast": ["text", "image"],
+      "deepseek/deepseek-v4.1-flash-ultrafast": ["text", "image"],
+      "openai/o3-pro": ["text"],
+    },
+    noVisionModels: ["openai/o3-pro"],
+    // #6877: on the Responses wire OpenGateway answers 400 once history replays native
+    // custom_tool_call/custom_tool_call_output items (Codex code-mode exec), and accepts the
+    // same request after the custom tool is lowered to a function. Same contract as xAI.
+    supportsResponsesCustomTools: false,
+    // Chat is the broad wire (77/80 active rows). o3-pro is Responses-only, on all
+    // inbounds. Only the two live-verified Sionic models bypass translation for Codex.
+    // Other OpenAI/Anthropic/Gemini rows stay on Chat until their Responses tool replay
+    // is independently verified; endpoint availability alone is not conformance evidence.
+    modelWireDefaults: {
+      "openai/o3-pro": "openai-responses",
+      "z-ai/glm-5.3-flash-ultrafast": { wire: "openai-responses", inbound: ["responses"] },
+      "deepseek/deepseek-v4.1-flash-ultrafast": { wire: "openai-responses", inbound: ["responses"] },
+    },
+    modelDiscovery: {
+      path: "models", // Public GET; lower-case ?status=active returns 400, so filter locally.
+      // Admit a row only on a wire it is served on: the Chat default needs chat_completions,
+      // and Responses-only rows are admitted only when pinned to Responses above. A future
+      // Responses-only row stays hidden until it is pinned, rather than 404ing on Chat.
+      filter: {
+        allOf: [{ path: ["status"], equalsAny: ["active"] }],
+        anyOf: [
+          { path: ["endpoints"], containsAny: ["chat_completions"] },
+          { path: ["id"], equalsAny: ["openai/o3-pro"] },
+        ],
+      },
+      preferFirst: [{ path: ["providers", "*", "id"], containsAny: ["sionic-ai"] }],
+    },
+    note: "Sionic AI's OpenAI-compatible gateway. Public live discovery lists active models served on Chat Completions (plus pinned Responses-only rows), with Sionic-served ultrafast models first. The public catalog cannot validate keys.",
+  },
+  {
     // Public contract checked 2026-09-29: https://docs.tokenlab.sh/api-reference/models/list-models
     // A supplied key is validated and scopes the catalog; anonymous discovery is also public.
     id: "tokenlab",
@@ -1178,6 +1246,25 @@ export const PROVIDER_REGISTRY_EXTENDED: readonly ProviderRegistryEntry[] = [
       },
     },
     note: "OpenAI-compatible API gateway. Create a workspace API key at tokenlab.sh. Live discovery lists tool-capable chat models available to your key and delivery policy.",
+  },
+  {
+    // Modelflare: OpenAI-compatible relay at https://modelflare.dev/v1 (an Anthropic Messages
+    // surface also answers at https://modelflare.dev/v1/messages). Live-checked 2026-10-13 through
+    // the proxy: chat, streaming and tool calls succeed on Chat for all four seeded models, and a
+    // real `codex exec` turn completed on glm-5.3-flash. GET /v1/models lists ~77 rows mixing chat,
+    // image and video models, and includes deepseek-v4.1-flash, which answers 503 on every call,
+    // so the preset seeds the verified chat models statically instead of trusting live discovery.
+    // The conventional env reference derived from the id is ${MODELFLARE_API_KEY}.
+    id: "modelflare",
+    label: "Modelflare",
+    adapter: "openai-chat",
+    baseUrl: "https://modelflare.dev/v1",
+    authKind: "key",
+    dashboardUrl: "https://modelflare.dev",
+    preserveCustomDestination: true,
+    defaultModel: "glm-5.3-flash",
+    models: ["glm-5.3-flash", "claude-sonnet-5-5", "gpt-6.1-sol", "deepseek-v4-flash"],
+    note: "OpenAI-compatible relay for Claude, GPT, GLM and DeepSeek chat models. The seeded models were verified with chat, streaming and tool calls; deepseek-v4.1-flash is listed upstream but currently answers 503 and is left out. An ordinary key only reaches its own routing group's models; a Smart key reaches all seeded models. Image and video models are not served through this Chat preset. Upstream latency varies widely (a few seconds to about 30 s) with occasional transient 503s.",
   },
   {
     id: "opencode-free",
@@ -1400,7 +1487,6 @@ export const PROVIDER_REGISTRY_EXTENDED: readonly ProviderRegistryEntry[] = [
     models: [...QODER_GLOBAL_MODELS],
     liveModels: true,
     reasoningEfforts: [...QODER_REASONING_EFFORTS],
-    noVisionModels: [...QODER_GLOBAL_MODELS],
     note: "Official Qoder Global CLI using QODER_PERSONAL_ACCESS_TOKEN. Models are discovered per account with `qoder --list-models`; the documented roster is a degraded fallback. The CLI runs single-turn with tools, MCP, settings hooks, and session persistence disabled. Requires `npm install -g @qoder-ai/qodercli`.",
   },
   {

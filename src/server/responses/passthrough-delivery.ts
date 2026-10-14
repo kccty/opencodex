@@ -18,18 +18,22 @@ import {
   relayWithAbort,
 } from "../relay";
 import { isUsageDebugEnabled } from "../../usage/debug";
-import { isReplayRefusalResponse } from "../../lib/upstream-retry";
+import { isNonReplayableResponse, isReplayRefusalResponse } from "../../lib/upstream-retry";
+import { sanitizeNonReplayableUpstreamError } from "./non-replayable-error";
 import { teeWithBoundedInspection } from "../inspection-tee";
 import {
   codexForwardTerminalOutcomeRecorder,
   usesCodexForwardPoolAuth,
+  liveMainQuotaDispatch,
   codexQuotaOutcomeMeta,
   codexDenialOutcomeMeta,
   isFixedCodexAccount,
   shouldDeferCodexResetDerivedCooldown,
 } from "./core-codex-account";
+import { isMainQuotaDispatchLive, isMainQuotaDispatchWsClaimed } from "../../codex/main-account-cache";
+import { MAIN_CODEX_ACCOUNT_ID } from "../../codex/account-id";
 import type { ResponsesTerminalStatus } from "../../bridge";
-import { isCodexWsQuotaObservedResponse, isCodexWsUpstreamResponse } from "./ws-upstream";
+import { isCodexWsQuotaObservedResponse, isCodexWsUpstreamResponse, isCodexWsPreludeProjection } from "./ws-upstream";
 import { recordSubagentQuotaFailureForThreadSpawn } from "../../codex/subagent-model-fallback";
 import { recordCodexUpstreamOutcome } from "../../codex/routing";
 import { codexProbeLeaseId, codexProbeQuotaScope, codexTransientProbeGrant, releaseCodexAuthContextProbeLease } from "../../codex/auth-context";
@@ -99,10 +103,12 @@ import {
   PLAINTEXT_V2_AGENT_MESSAGE_RESTORE_OVERFLOW_MESSAGE,
 } from "../../responses/plaintext-v2-agent-messages";
 import { createResponsesFieldBackfillBlockRewrite } from "./responses-field-backfill";
+import { createHostedImageDisplayRewrite, isLocalCodexImageClient } from "../responses-hosted-image-display";
 import { createResponsesFunctionToolRepairBlockRewrite } from "../responses-function-tool-repair";
 import {
   createUndeclaredToolCallGuardBlockRewrite,
   currentTurnWireToolCatalogBody,
+  UNDECLARED_TOOL_CALL_ERROR_CODE,
   undeclaredToolCallNameInResponse,
   undeclaredToolCallMessage,
   normalizeDefaultNamespaceInJson,
@@ -137,6 +143,7 @@ import {
   httpStatusFromTerminalError,
   inspectResponseLogJson,
   inspectResponseLogSsePayloadParsed,
+  noteUpstreamRequestId,
 } from "../request-log";
 import { restoreRoutedCustomCallsInJson } from "../../responses/custom-tool-compat";
 import { restoreRoutedToolSearchCallsInJson } from "../../responses/tool-search-compat";
@@ -362,6 +369,7 @@ export async function deliverPassthroughResponse(
     | "subagentFallbackAccountId"
     | "clientRequestedStream"
     | "translatorBudget"
+    | "inboundWire"
   >,
   transportState: Pick<ResponsesTransport, "requestBindings">,
   sidecarState: Pick<ResponsesSidecarAuth, "openAiSidecar">,
@@ -401,8 +409,12 @@ export async function deliverPassthroughResponse(
     | "noteInspectedPayload"
     | "normalizeFunctionCompletionJson"
     | "localUpstream"
+    | "terminalOutcomeRecorded"
   >,
 ): Promise<Response> {
+  const { route } = requestState;
+  // The proof must belong to the response whose headers are published.
+  const arrivalMainDispatch = liveMainQuotaDispatch(admissionState.authCtx, route.provider);
   const { logCtx, config, options, req } = requestContext;
   const {
     codexSafetyBufferingOptions,
@@ -426,7 +438,7 @@ export async function deliverPassthroughResponse(
     normalizeFunctionCompletionJson,
   } = nativeExchange;
   const { commitReasoningReplayServingRoute, recordTerminalOutcomes } = responseEffects;
-  const { parsed, route, subagentQuotaFailureModel, clientRequestedStream, translatorBudget } = requestState;
+  const { parsed, subagentQuotaFailureModel, clientRequestedStream, translatorBudget } = requestState;
   const { openAiSidecar } = sidecarState;
   const { requestBindings } = transportState;
 
@@ -448,6 +460,7 @@ export async function deliverPassthroughResponse(
   }
 
     const headers = sanitizePassthroughHeaders(upstreamResponse.headers, codexSafetyBufferingOptions);
+    if (!upstreamResponse.ok) noteUpstreamRequestId(logCtx, headers);
     const resolvedModel = headers.get("openai-model")?.trim();
     if (resolvedModel) {
       logCtx.servedModel = resolvedModel;
@@ -474,7 +487,9 @@ export async function deliverPassthroughResponse(
       ? (status: ResponsesTerminalStatus, httpStatusOverride?: number): void => {
         if (terminalOutcomeRecorded) return;
         terminalOutcomeRecorded = true;
-        recordTerminalOutcome(status, httpStatusOverride);
+        // A restored pre-output refusal whose account outcome dispatch already wrote (#6969) keeps
+        // every other terminal callback but must not write the same refusal a second time.
+        if (!nativeExchange.terminalOutcomeRecorded) recordTerminalOutcome(status, httpStatusOverride);
       }
       : undefined;
     const terminalBodyWillRecord = !!terminalRecorder && upstreamResponse.ok && isEventStream;
@@ -487,7 +502,8 @@ export async function deliverPassthroughResponse(
       if (!isCodexWsQuotaObservedResponse(upstreamResponse)) {
         applyAccountQuotaFromUpstreamHeaders(admissionState.authCtx.accountId, upstreamResponse.headers,
           admissionState.authCtx.writerGeneration, admissionState.authCtx.kind === "main-pool" ? admissionState.authCtx.mainQuotaWriter : undefined,
-          { modelId: route.modelId, poolWriter: admissionState.authCtx.kind === "pool" ? admissionState.authCtx.poolQuotaWriter : undefined });
+          { modelId: route.modelId, poolWriter: admissionState.authCtx.kind === "pool" ? admissionState.authCtx.poolQuotaWriter : undefined,
+            poolResponse: admissionState.authCtx.kind === "pool" });
       }
       if (terminalBodyWillRecord) {
         options.setTerminalOutcomeRecorder?.((status, httpStatusOverride) => {
@@ -530,6 +546,20 @@ export async function deliverPassthroughResponse(
           ...(admissionState.authCtx.kind === "pool" ? { credentialGeneration: admissionState.authCtx.generation } : {}),
         });
       }
+    } else {
+      // The WS observer is the only plain-main publisher for a WebSocket exchange;
+      // a prelude projection carries the prelude snapshot, not fresh evidence.
+      // The dispatch claim is authoritative because downstream wrappers can replace the Response.
+      if (arrivalMainDispatch && !isMainQuotaDispatchWsClaimed(arrivalMainDispatch)
+        && !(isCodexWsUpstreamResponse(upstreamResponse) || isCodexWsPreludeProjection(upstreamResponse))) {
+        const { applyAccountQuotaFromUpstreamHeaders } = await import("../../codex/auth-api");
+        // Import yields; same-account token replacement leaves the identity writer live.
+        // Re-check the credential fence with no await before publication.
+        if (isMainQuotaDispatchLive(arrivalMainDispatch)) {
+          applyAccountQuotaFromUpstreamHeaders(MAIN_CODEX_ACCOUNT_ID, upstreamResponse.headers,
+            arrivalMainDispatch.configGeneration, arrivalMainDispatch.writer, { modelId: route.modelId });
+        }
+      }
     }
 
     // Non-2xx passthrough failures must never reach Codex as an empty body —
@@ -541,6 +571,9 @@ export async function deliverPassthroughResponse(
     // through sanitizePassthroughHeaders) so a redirect to a dead host can never
     // masquerade as a pre-connection failure after the credential was seen.
     // The numeric outcome above already classified it neutral — no streak.
+    if (isNonReplayableResponse(upstreamResponse) && !isReplayRefusalResponse(upstreamResponse)) {
+      return await sanitizeNonReplayableUpstreamError(upstreamResponse, upstream.signal);
+    }
     if (upstreamResponse.status >= 300 && upstreamResponse.status < 400) {
       return new Response(upstreamResponse.body, {
         status: upstreamResponse.status,
@@ -631,6 +664,7 @@ export async function deliverPassthroughResponse(
         route.provider.webSearchBridge?.backend,
         config,
         openAiSidecar,
+        route.providerName,
       );
       const webSearchBridgePlan = planPassthroughWebSearchBridge(parsed, route.provider, {
         providerName: route.providerName,
@@ -823,13 +857,17 @@ export async function deliverPassthroughResponse(
           : undefined,
         // Last: every rewrite above can still rename or reshape a call item, so the guard must
         // compare the names the client will actually receive against the declared catalog.
-        nativeExchange.undeclaredToolGuardActive
+        // Deferred-catalog wires keep the rewrite for its normalization half only: a provider's
+        // `default.X` call still collapses to the declared `X`, but an undeclared name is the
+        // client's own deferred registry's business, not this proxy's verdict.
+        nativeExchange.undeclaredToolGuardActive || declaredWireToolNames.size > 0
           ? createUndeclaredToolCallGuardBlockRewrite(
             declaredWireToolNames,
             declaredNamelessClientCallTypes,
             providerExecutedCallTypes,
             declaredBareWireToolNames,
             recoverableBareCustomWireToolNames,
+            { refuseUndeclared: nativeExchange.undeclaredToolGuardActive },
           )
           : undefined,
         grokUpstreamEchoEnabled
@@ -839,6 +877,10 @@ export async function deliverPassthroughResponse(
           : undefined,
         createTerminalErrorRedactionBlockRewrite(nativeExchange.request.headers, maskCredential),
         rememberPlaintextBlock,
+        // Display-only projection must follow every continuation-cache observer.
+        isLocalCodexImageClient(req.headers, options.admission?.kind, options.inboundWire)
+          ? createHostedImageDisplayRewrite()
+          : undefined,
       ].filter((rewrite): rewrite is NonNullable<typeof rewrite> => rewrite !== undefined);
       const clientBlockRewrite = blockRewrites.length > 0
         ? composeSseBlockRewrites(...blockRewrites)
@@ -1283,10 +1325,7 @@ export async function deliverPassthroughResponse(
       if (grokUpstreamEchoEnabled) {
         clientJson = stripGrokUpstreamEnvelopeEchoFromResponsesJson(clientJson);
       }
-      // #1700: same fail-closed policy as the SSE relay above. Both the plain JSON answer and
-      // the reframed-SSE branch below are built from this body, so one check covers them. This
-      // runs BEFORE the continuation cache write below: a refused turn must not become state a
-      // later `previous_response_id` replay can expand from.
+      // Both response formats use this body, before a refused turn can enter continuation state.
       if (nativeExchange.undeclaredToolGuardActive) {
         const undeclared = (() => {
           try {
@@ -1303,8 +1342,14 @@ export async function deliverPassthroughResponse(
           }
         })();
         if (undeclared !== undefined) {
-          return formatErrorResponse(502, "upstream_error", undeclaredToolCallMessage(undeclared));
+          return formatErrorResponse(502, "upstream_error", undeclaredToolCallMessage(undeclared), {
+            code: UNDECLARED_TOOL_CALL_ERROR_CODE,
+          });
         }
+      }
+      // Same split as the SSE rewrite: normalization applies whenever a declared name exists,
+      // even on wires whose deferred catalog stands the refusal down.
+      if (declaredWireToolNames.size > 0) {
         clientJson = normalizeDefaultNamespaceInJson(
           clientJson,
           declaredWireToolNames,
@@ -1317,6 +1362,17 @@ export async function deliverPassthroughResponse(
           JSON.parse(grokUpstreamEchoEnabled ? clientJson : text) as { id?: unknown; output?: unknown; status?: unknown; model?: unknown },
         );
       } catch { /* non-JSON despite content-type; recording is best-effort */ }
+      if (isLocalCodexImageClient(req.headers, options.admission?.kind, options.inboundWire)) {
+        const imageDisplay = createHostedImageDisplayRewrite();
+        try {
+          clientJson = imageDisplay.json(clientJson);
+        } catch (error) {
+          if (error instanceof RangeError) {
+            return formatErrorResponse(502, "upstream_error", "hosted image result exceeds local display limits");
+          }
+          throw error;
+        } finally { imageDisplay.dispose?.(); }
+      }
       // #875: the transport-neutral reliability policy forced a bounded JSON
       // upstream for a client that asked for SSE. Reframe the completed JSON
       // as the canonical terminal SSE sequence (created → output_item.done →

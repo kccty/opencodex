@@ -1,4 +1,5 @@
 import type { KiroOAuthMetadata } from "../oauth/types";
+import type { NativeReasoningOwner } from "../responses/reasoning-replay-cache";
 import type { OcxTool, OcxToolChoice } from "./tools";
 import type { TierDecision, TierObservationContext } from "./provider";
 
@@ -50,11 +51,17 @@ export interface OcxParsedRequest {
   _responseModelId?: string;
   /** Selected OpenAI API virtual-model id retained after it rewrites the upstream wire model. */
   _openAiVirtualSelectedModelId?: string;
+  /** Serialized-only model id (xAI OAuth Fast lane); policy keeps reading `modelId`. */
+  _wireModelOverride?: string;
   previousResponseId?: string;
   context: OcxContext;
   stream: boolean;
   options: OcxRequestOptions;
   _rawBody?: unknown;
+  /** Claude replay tags, retained only until each route binding verifies them. */
+  _nativeReasoningReplay?: ReadonlyMap<string, string>;
+  _nativeReasoningBoundOwner?: NativeReasoningOwner;
+  _nativeReasoningMint?: { owner?: NativeReasoningOwner };
   /**
    * Boundary between replayed history and this turn's newly appended input. Usually the
    * items the proxy restored from local previous_response_id state; also set when the
@@ -114,6 +121,8 @@ export interface OcxParsedRequest {
   _cursorIsolateConversation?: boolean;
   /** Account-scoped, non-secret Kiro request metadata selected with the OAuth access token. */
   _kiroAuthContext?: Pick<KiroOAuthMetadata, "profileArn" | "apiRegion" | "ssoRegion" | "authType">;
+  /** Account-scoped Zed user identity paired with the long-lived access token. */
+  _zedAuthContext?: { userId: string };
   /** Provider-private continuation metadata resolved from the Responses previous_response_id chain. */
   _providerContinuation?: OcxProviderContinuationState;
   /** Persisted continuation considered only after the final physical route is known. */
@@ -155,6 +164,19 @@ export interface OcxParsedRequest {
    * provider-private continuation caches again on every later turn.
    */
   _contextCompactionBoundary?: boolean;
+  /**
+   * Core-owned registration slot for the optional advisor subsystem (src/advisor). Set per request
+   * by the sidecar planner, never at module load: the core Responses path only sees this
+   * structural shape, so an advisor-disabled install imports no advisor module. When present, the
+   * adapter delivery wraps the worker's event stream with it — the guard holds synthetic
+   * `advisor` tool calls, consults the configured expert model, and re-dispatches the worker.
+   */
+  _advisorGuard?: (options: {
+    parsed: OcxParsedRequest;
+    firstEvents: AsyncIterable<AdapterEvent>;
+    /** One bounded worker continuation re-dispatch (same machinery as the terminal guard). */
+    continuation: (parsed: OcxParsedRequest) => AsyncIterable<AdapterEvent> | Promise<AsyncIterable<AdapterEvent>>;
+  }) => AsyncGenerator<AdapterEvent>;
 }
 
 export interface OcxContext {
@@ -432,7 +454,14 @@ export type AdapterEvent =
       /** Responses error type and code when the adapter has a structured provider failure. */
       errorType?: string;
       code?: string;
+      /** Proxy-internal permission to consider API-key recovery; never serialized. */
+      apiKeyRecovery?: true;
       retryable?: boolean;
+      /**
+       * Proxy-internal, never serialized: the upstream failed the turn before producing text or a
+       * tool call, so the opt-in empty-completion guard may replay the identical request once.
+       */
+      replaySafeBeforeOutput?: boolean;
     };
 
 /**

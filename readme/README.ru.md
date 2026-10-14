@@ -161,10 +161,6 @@ opencodex также умеет управлять **пулом аккаунто
 <td>Благодарим <a href="https://www.orcarouter.ai/?utm_source=opencodex&utm_medium=readme">OrcaRouter</a> за спонсорскую поддержку проекта! OrcaRouter — единый OpenAI-совместимый AI-шлюз для продакшена: адаптивная маршрутизация оценивает каждый промпт и отправляет его модели, которая проходит ваш порог, плюс автоматический failover, правила маршрутизации как код, цены провайдеров без наценки с кэшированием промптов, а также guardrails, файрвол агентов и журналы запросов на каждый вызов среди 200+ моделей. Выберите <code>OrcaRouter</code> в селекторе Add provider или выполните <code>ocx provider add orcarouter</code>; <code>orcarouter/auto</code> — адаптивный маршрутизатор.</td>
 </tr>
 <tr>
-<td width="180"><a href="https://www.packyapi.com/register?aff=k5KT"><img src="../assets/sponsors/packycode.png" alt="PackyCode" width="150"></a></td>
-<td>Благодарим <a href="https://www.packyapi.com/register?aff=k5KT">PackyCode</a> за спонсорскую поддержку проекта! PackyCode — стабильный высокопроизводительный API-релей, предоставляющий релей-сервисы для Claude Code, Codex, Gemini и других. Автоматический failover, умная маршрутизация и неограниченная конкурентность превращают AI в настоящий инструмент продуктивности. <a href="https://www.packyapi.com/register?aff=k5KT">Зарегистрируйтесь по этой ссылке</a> и начните работу! Выберите <code>PackyCode</code> в селекторе Add provider или выполните <code>ocx provider add packycode</code>.<br><sub>PackyCode 是一家稳定、高效的 API 中转服务商，提供 Claude Code、Codex、Gemini 等多种中转服务。具备自动故障转移、智能路由和无限并发等多种功能，让 AI 编程成为真正的生产力工具。<a href="https://www.packyapi.com/register?aff=k5KT">点此链接注册</a>，立即开始使用！</sub></td>
-</tr>
-<tr>
 <td width="180"><a href="https://tokenlab.sh/r/OPENCODEX"><picture><source media="(prefers-color-scheme: dark)" srcset="../assets/sponsors/tokenlab-dark.png"><img src="../assets/sponsors/tokenlab-light.png" alt="TokenLab" width="150"></picture></a></td>
 <td>Благодарим <a href="https://tokenlab.sh/r/OPENCODEX">TokenLab</a> за спонсорскую поддержку проекта! TokenLab даёт агентам для программирования один API-ключ для ведущих моделей с поддержкой форматов OpenAI Responses и Chat Completions, Anthropic Messages и нативного API Gemini, включая стриминг и вызов инструментов. Также доступны MCP-сервер и Skills для агентов, чтобы упростить интеграцию. Выберите режим доставки и платите по мере использования. Выберите <code>TokenLab</code> в селекторе Add provider или выполните <code>ocx provider add tokenlab</code>.<br><sub>TokenLab 为编程智能体提供统一的多模型 API，一枚 API Key 即可接入主流模型，支持 OpenAI Responses、Chat Completions、Anthropic Messages 和 Gemini 原生 API 格式，以及流式输出和工具调用。同时提供 MCP 服务器和 Agent Skills，方便接入现有工作流；交付模式可选，按量付费。</sub></td>
 </tr>
@@ -332,7 +328,7 @@ OpenCodex отслеживает состояние, удерживаемое п
   хранилища native control replay: оно закреплено и не вытесняется.
 - **4 наблюдаемых буфера** (аккумуляторы транслятора, хвосты image/OAuth/Grok)
   мониторятся по байтовому давлению in-flight без вытеснения.
-- **28 регистраций state-store** выполняют sweeps истечения (интервал 60 с) и сверку
+- **31 регистрация state-store** выполняет sweeps истечения (интервал 60 с) и сверку
   поколений конфигурации, чтобы удалять устаревшие ключи провайдеров и аккаунтов.
 - **Мемо пути и отпечатков** (метаданные рабочей области, усиленные идентификаторы,
   соли установки, возможности mode-hint) используют LRU-потолки в порядке вставки
@@ -376,12 +372,17 @@ JEV вызывается только для `jev-auto` и только один
 со стороны клиента по-прежнему отменяет запрос. Автотесты используют имитацию TypeSafe и не проверяют
 настоящий аккаунт JEV.
 
+Combo JEV может вместо этого обращаться к самостоятельно размещённой модели решений, например к
+бесключевой `tev1` в Ollama: добавьте провайдера `jev-decision`, у которого `baseUrl` — полный адрес
+`/v1/systemone`, и укажите его в `decisionProvider` Combo. Учётные данные TypeSafe туда никогда не
+отправляются. Подробнее: [самостоятельно размещённая модель решений](https://opencodex.me/ru/guides/combos/).
+
 ## Провайдеры и адаптеры
 
 <!-- sponsors:main-first-mention -->
 OpenAI (вход ChatGPT или API-ключ), Anthropic, Google Gemini, xAI, Kimi, Azure OpenAI, Ollama
 (локально + Cloud), Cursor (экспериментально) и любой OpenAI-совместимый endpoint — плюс DeepSeek,
-Groq, OpenRouter, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax,
+Groq, OpenRouter, OpenGateway, Together, Fireworks, Cerebras, Mistral, Hugging Face, NVIDIA NIM, MiniMax,
 Qwen Cloud, Qoder Global и CN (официальный PAT + CLI), SiliconFlow и другие. Полный список: `ocx init` или
 [документация по провайдерам](https://opencodex.me/ru/guides/providers/).
 
@@ -468,8 +469,8 @@ npm uninstall -g @bitkyc08/opencodex
 
 ## Разработка
 
-Разработка из исходников требует CLI `bun` в вашем `PATH`. Это отдельно от встроенного рантайма Bun
-опубликованного npm-пакета, который используют только установленные команды `ocx`.
+Разработка из исходников требует CLI `bun` в вашем `PATH`. Опубликованный npm-пакет содержит свой рантайм Bun
+для установленных команд `ocx`; скрипты пакета также могут находить Bun через эту встроенную зависимость.
 
 ```bash
 git clone https://github.com/lidge-jun/opencodex.git

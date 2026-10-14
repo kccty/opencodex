@@ -6,6 +6,7 @@ import {
   filterCombos,
   groupCombos,
   jevAutoDraft,
+  jevDecisionProviderIssue,
 } from "../combo-workspace-data";
 import { IconChevron, IconPlus, IconSearch, IconShuffle } from "../icons";
 import { useT } from "../i18n/shared";
@@ -23,6 +24,7 @@ export default function ComboWorkspace({
   providerQuotaStates,
   providers,
   models,
+  capabilityModels = models,
   cataloguedComboIds,
   loading,
   onRefresh,
@@ -31,12 +33,19 @@ export default function ComboWorkspace({
   onAdd,
   adding,
   addIntent,
+  addDecisionProvider,
   onCloseAdd,
   onCreated,
 }: ComboWorkspaceProps) {
   const t = useT();
   const providerMap = useMemo(
-    () => Object.fromEntries(providers.map((provider) => [provider.name, { disabled: provider.disabled }])),
+    () => Object.fromEntries(providers.map((provider) => [provider.name, {
+      disabled: provider.disabled,
+      adapter: provider.adapter,
+      baseUrl: provider.baseUrl,
+      defaultModel: provider.defaultModel,
+      models: provider.models,
+    }])),
     [providers],
   );
   const [query, setQuery] = useState("");
@@ -57,10 +66,13 @@ export default function ComboWorkspace({
       .map(provider => provider.name)),
     [providers],
   );
-  const addDraft = useMemo(
-    () => addIntent === "jev-auto" ? jevAutoDraft(models, jevTargetProviders) : undefined,
-    [addIntent, jevTargetProviders, models],
-  );
+  const addDraft = useMemo(() => {
+    if (addIntent !== "jev-auto") return undefined;
+    // A deep-linked row that is not a usable decision service falls back to TypeSafe.
+    const usable = providers.length === 0
+      || jevDecisionProviderIssue(addDecisionProvider, providerMap) === null;
+    return jevAutoDraft(models, jevTargetProviders, usable ? addDecisionProvider : null);
+  }, [addDecisionProvider, addIntent, jevTargetProviders, models, providerMap, providers.length]);
 
   const filtered = useMemo(() => filterCombos(combos, query), [combos, query]);
   const sections = useMemo(() => groupCombos(filtered), [filtered]);
@@ -206,12 +218,14 @@ export default function ComboWorkspace({
             key={baseline.id}
             apiBase={apiBase}
             baseline={baseline}
+            combos={combos.filter((c) => c.id !== baseline.id)}
             otherIds={otherComboIds}
             otherAliases={otherComboAliases}
             providerMap={providerMap}
             providerQuotaStates={providerQuotaStates}
             providers={providers}
             models={models}
+            capabilityModels={capabilityModels}
             onBack={() => trySelect(null)}
             onSaved={(item) => {
               setDetailDirty(false);
@@ -232,6 +246,7 @@ export default function ComboWorkspace({
         ) : creatingFirstCombo ? (
           <DetailPanel
             key="first-combo"
+            apiBase={apiBase}
             baseline={firstComboDraft}
             isCreate
             otherIds={[]}
@@ -240,6 +255,7 @@ export default function ComboWorkspace({
             providerQuotaStates={providerQuotaStates}
             providers={providers}
             models={models}
+            capabilityModels={capabilityModels}
             onSaved={(item) => {
               setDetailDirty(false);
               setSelectedId(item.id);
@@ -255,6 +271,7 @@ export default function ComboWorkspace({
             cataloguedComboIds={cataloguedComboIds}
             providerMap={providerMap}
             providerQuotaStates={providerQuotaStates}
+            providers={providers}
             onSelect={(id) => trySelect(id)}
             onAdd={onAdd}
           />
@@ -263,13 +280,16 @@ export default function ComboWorkspace({
 
       {adding && (
         <AddComboModal
-          key={addIntent ?? "blank"}
+          key={`${addIntent ?? "blank"}:${addDraft?.decisionProvider ?? ""}`}
+          apiBase={apiBase}
+          combos={combos}
           existingIds={combos.map((c) => c.id)}
           existingAliases={existingComboAliases}
           providerMap={providerMap}
           providerQuotaStates={providerQuotaStates}
           providers={providers}
           models={models}
+          capabilityModels={capabilityModels}
           initialDraft={addDraft}
           onClose={onCloseAdd}
           onSubmit={async (item) => {

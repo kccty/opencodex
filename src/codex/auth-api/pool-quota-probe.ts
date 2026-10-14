@@ -1,3 +1,4 @@
+import { parseCodexCredits, rememberCodexCredits } from "../credits";
 import { fetchCodexUsage } from "../quota-query-backoff";
 import type { CodexUsageOwner } from "../quota-query-backoff";
 import { capturePoolQuotaWriter, getValidCodexToken, isCodexAccountGenerationLive, forceRefreshCodexPoolToken, markCodexAccountValidated, markCodexAccountValidationFailed, readCodexAccountRecord, isTerminalCodexPoolRefreshFailure, CodexCredentialGenerationConflictError, CodexCredentialRefreshLockTimeoutError, CodexCredentialRefreshBusyError, CodexCredentialRefreshStaleError, TokenRefreshError } from "../account-store";
@@ -15,14 +16,12 @@ import { WHAM_REQUEST_TIMEOUT_MS } from "../quota-recovery-timing";
 import { claimQuotaRecovery, fencePropagatedQuotaRecovery, quotaRecoveryTerminalFor, releaseQuotaRecovery, settleQuotaRecovery, settleQuotaRecoveryTerminal } from "../quota-401-recovery";
 import { seedLoginRowsForTests } from "./login-state";
 import { nonEmptyPlan } from "./runtime-config";
+import { CODEX_TERMINAL_AUTH_CODES } from "../quota-refresh-outcome";
 
 export const POOL_CACHE_TTL = 5 * 60_000;
 export const POOL_QUOTA_REFRESH_CONCURRENCY = 4;
 
-export const MAIN_TERMINAL_AUTH_CODES = new Set([
-  "invalid_workspace_selected",
-  "invalid_refresh_token",
-]);
+export const MAIN_TERMINAL_AUTH_CODES: ReadonlySet<string> = new Set(CODEX_TERMINAL_AUTH_CODES);
 
 export async function readMainAuthErrorCode(resp: Response): Promise<unknown> {
   try {
@@ -354,6 +353,9 @@ export async function commitPoolQuotaResponse(
   if (ctx.mayPublish?.() === false) {
     return { quota: getAccountQuota(accountId), needsReauth: false, credentialGeneration: generation };
   }
+  if (ctx.poolWriter && isCodexAccountGenerationLive(accountId, generation)) {
+    rememberCodexCredits(accountId, ctx.poolWriter.historyIdentity, parseCodexCredits(data.credits));
+  }
   const freshPlan = nonEmptyPlan(data.plan_type) ?? undefined;
   const quota = parseUsageQuota({ ...data, plan_type: freshPlan ?? configuredPlan });
   const freshResetCredits = quota?.resetCredits;
@@ -370,7 +372,8 @@ export async function commitPoolQuotaResponse(
   }
   const validPolicyObservation = isValidWhamHistoryObservation(data);
   setAccountQuotaFromParsed(accountId, quota, writerGeneration, undefined, validPolicyObservation ? quota : null,
-    ctx.poolWriter && validPolicyObservation ? { writer: ctx.poolWriter, observedAt, source: "wham", raw: quota } : undefined);
+    ctx.poolWriter && validPolicyObservation ? { writer: ctx.poolWriter, observedAt, source: "wham", raw: quota } : undefined,
+    true);
   // One healthy pool account is enough to serve the Codex lane: lift its combo cooldowns the
   // same way the main-account probe does, so a recovered pool member unblocks combos too.
   liftCodexLaneComboCooldowns(getAccountQuota(accountId));
@@ -496,6 +499,7 @@ export async function fetchPoolAccountQuota(
   validatePending = false,
   afterDispatchSequence?: number,
   recoveryProbeNow?: number,
+  explicitRefresh = false,
 ): Promise<PoolQuotaResult> {
   const existing = getAccountQuota(accountId);
   if (afterDispatchSequence === undefined && !forceRefresh && existing && Date.now() - existing.updatedAt < POOL_CACHE_TTL) {
@@ -505,10 +509,23 @@ export async function fetchPoolAccountQuota(
       credentialGeneration: readCodexAccountRecord(accountId)?.generation,
     };
   }
+  const record = readCodexAccountRecord(accountId);
+  // The token endpoint already called this grant revoked or expired. Only a re-login or a
+  // completed validation rewrites the record and drops the marker, so until then a passive read
+  // (dashboard poll, listing, priming, recovery probe) would only POST the dead refresh token again
+  // and log the same 401. Report the stored verdict the failed refresh would have produced. An
+  // operator's explicit refresh command from any principal, a dashboard validation, and a post-reset
+  // readback keep their probe, and a source-linked credential spends no grant of its own, so none
+  // of them is held here.
+  if (!explicitRefresh && !validatePending && afterDispatchSequence === undefined && record && record.deletedAt == null
+    && record.credential && !record.credential.sourceAuthPath
+    && record.lastCodexValidationTerminal === true && record.lastCodexValidationStatus === "failed") {
+    markAccountNeedsReauth(accountId, captureConfigGeneration(), record.generation);
+    return { quota: existing ?? null, needsReauth: true, reauthReason: "refresh_failed", credentialGeneration: record.generation };
+  }
   // A token refresh may increment the generation (and rotate the refresh token) before WHAM
   // completes. Join a flight whose starting or resolved generation is still current, but let a
   // replacement credential with the same pool id start its own request.
-  const record = readCodexAccountRecord(accountId);
   const flights = poolQuotaRefreshInFlight.get(accountId);
   const current = flights && [...flights].find(flight => {
     const generation = flight.state.resolvedCredentialGeneration
