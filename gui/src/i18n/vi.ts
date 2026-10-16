@@ -493,6 +493,13 @@ export const vi: Record<TKey, string> = {
   "compactionRouting.loadFailed": "Không thể tải cài đặt nén.",
   "compactionRouting.saved": "Đã lưu cài đặt nén.",
   "compactionRouting.saveFailed": "Không thể lưu. Thay đổi của bạn vẫn còn; hãy thử lại.",
+  "autoReviewModel.title": "Mô hình tự động phê duyệt",
+  "autoReviewModel.description": "Mô hình xem xét các yêu cầu phê duyệt. Chuyển đổi có hiệu lực ngay — lượt xem xét tiếp theo được định tuyến tới mô hình đã chọn, không cần khởi động lại Codex.",
+  "autoReviewModel.default": "Tích hợp Codex (codex-auto-review)",
+  "autoReviewModel.saved": "Đã lưu.",
+  "autoReviewModel.saveFailed": "Lưu thất bại.",
+  "autoReviewModel.loadFailed": "Không thể tải mô hình phê duyệt hiện tại.",
+
   "memoryModels.title": "Định tuyến bộ nhớ",
   "memoryModels.description": "Codex ghi bộ nhớ ở chế độ nền sau khi phiên kết thúc. Chọn mô hình cho từng giai đoạn hoặc giữ tuyến hiện tại.",
   "memoryModels.infoLabel": "Extract và Consolidation là gì?",

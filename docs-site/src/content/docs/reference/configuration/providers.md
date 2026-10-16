@@ -584,6 +584,12 @@ These fields are available in `config.json`, the provider management API, and th
 JSON provider editor. Dedicated form controls are not present. Native root stamps record the
 previous value and restore it on removal when the stamped value has not been changed externally.
 
+The Dashboard's **Auto review model** selector is a separate, hot mechanism: `PUT
+/api/auto-review-model` maintains the `codex-auto-review` entry in `blockedModelRedirects`,
+so the routing layer reroutes the next review request to the selected model without a Codex
+restart. It never writes `auto_review_model` or provider fields, and clearing it restores
+upstream reviewer routing while leaving every other redirect entry alone.
+
 ### Discovered model display names
 
 Use `modelDisplayNames` when a provider returns machine friendly ids but the Codex model picker

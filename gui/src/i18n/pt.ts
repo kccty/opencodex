@@ -507,6 +507,13 @@ export const pt: Record<TKey, string> = {
   "compactionRouting.loadFailed": "Não foi possível carregar as configurações de compactação.",
   "compactionRouting.saved": "Configurações de compactação salvas.",
   "compactionRouting.saveFailed": "Não foi possível salvar. Suas alterações continuam aqui; tente novamente.",
+  "autoReviewModel.title": "Modelo de revisão automática",
+  "autoReviewModel.description": "O modelo que avalia pedidos de aprovação. A troca é imediata — a próxima revisão é roteada para o modelo escolhido, sem reiniciar o Codex.",
+  "autoReviewModel.default": "Integrado do Codex (codex-auto-review)",
+  "autoReviewModel.saved": "Salvo.",
+  "autoReviewModel.saveFailed": "Falha ao salvar.",
+  "autoReviewModel.loadFailed": "Não foi possível carregar o revisor atual.",
+
   "memoryModels.title": "Roteamento de memória",
   "memoryModels.description": "O Codex grava memórias após o término de uma sessão. Escolha um modelo para cada fase ou mantenha a rota existente.",
   "memoryModels.infoLabel": "O que são Extração e Consolidação?",
