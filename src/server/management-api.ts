@@ -60,6 +60,7 @@ import { applySystemEnvToggle } from "./system-env";
 import type { ManagementApiDeps } from "./management/context";
 import { handleConfigRoutes } from "./management/config-routes";
 import { handleAutoReviewRoutes } from "./management/auto-review-routes";
+import { handleNativeReasoningRetentionRoutes } from "./management/native-reasoning-retention-routes";
 import { handleLogsUsageRoutes } from "./management/logs-usage-routes";
 import { handleStorageLogGuardRoutes } from "./management/storage-log-guard-routes";
 import { handleRequestHistoryRoutes } from "./management/request-history-routes";
@@ -346,6 +347,7 @@ export async function handleManagementAPI(
     ??     (await handleRemoteWorkspaceRoutesOnDemand(ctx))
     ??     (await handleConfigRoutes(ctx))
     ??     (await handleAutoReviewRoutes(ctx))
+    ??     (await handleNativeReasoningRetentionRoutes(ctx))
     ??     (await handleStorageLogGuardRoutes(ctx))
     ??     (await handleLogsUsageRoutes(ctx))
     ??     (await handleRequestHistoryRoutes(ctx))
@@ -521,7 +523,7 @@ export async function handleManagementAPI(
       const { handleMainDeviceReauthAPI } = await import("../codex/main-device-reauth-api");
       return handleMainDeviceReauthAPI(req, url, config);
     }
-    const { handleCodexAuthAPI } = await import("../codex/auth-api");
+    const { handleCodexAuthAPI } = await import("../codex/auth-api/routes");
     const { ConfigMutationLockError } = await import("../config");
     const { CodexCredentialRefreshLockTimeoutError } = await import("../codex/account-store");
     try {

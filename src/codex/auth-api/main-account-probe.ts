@@ -6,7 +6,7 @@ import { isCanonicalOpenAiForwardProvider, OPENAI_CODEX_PROVIDER_ID } from "../.
 import { providerCodexAccountMode } from "../../providers/registry";
 import { isSelectableCodexPoolAccount } from "../account-id";
 import type { OcxConfig } from "../../types";
-import { getAccountQuota, parseMainPolicyUsageQuota, parseUsageQuota, setAccountQuotaFromParsed } from "../quota";
+import { getAccountQuota, isValidWhamHistoryObservation, parseMainPolicyUsageQuota, parseUsageQuota, setAccountQuotaFromParsed } from "../quota";
 import type { StoredAccountQuota, WhamUsageResponse } from "../quota";
 import { liftCodexLaneComboCooldowns } from "../../combos/quota-recovery-lift";
 import { reconcileMainCodexAccountRuntimeState } from "../account-lifecycle";
@@ -279,6 +279,7 @@ export async function fetchMainAccountInfoWhileOwned(
   let quotaPhase: "request" | "body" | "decode" | "publish" = "request";
   let quotaRefreshGeneration = captureMainAccountIdentityGeneration();
   const readState: { owner?: CodexUsageOwner<MainAccountInfoFetchResult>; usable: boolean } = { usable: false };
+  /** Perform one single-flight main-account usage read: classify auth failures and publish parsed quota and decision evidence only while the dispatch and credential are still current. */
   const read = async (): Promise<MainAccountInfoFetchResult> => {
     try {
       let dispatchSequence = 0;
@@ -399,7 +400,7 @@ export async function fetchMainAccountInfoWhileOwned(
       // score and auto-switch the main account exactly like a pool account (Option A).
       setMainAccountPlan(result.plan);
       if (result.quota) {
-        setAccountQuotaFromParsed(MAIN_CODEX_ACCOUNT_ID, result.quota, writerGeneration, mainQuotaWriter, policyQuota);
+        setAccountQuotaFromParsed(MAIN_CODEX_ACCOUNT_ID, result.quota, writerGeneration, mainQuotaWriter, policyQuota, undefined, false, false, isValidWhamHistoryObservation(usage) ? quota : null);
         // The stored snapshot (merged, not just what this probe observed) decides: a healthy
         // account lifts the reset-derived combo cooldowns waiting on the exhausted window.
         liftCodexLaneComboCooldowns(getAccountQuota(MAIN_CODEX_ACCOUNT_ID));

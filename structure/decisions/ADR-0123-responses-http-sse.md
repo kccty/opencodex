@@ -1,6 +1,6 @@
 # ADR-0123 — decision recorded under "Responses HTTP/SSE"
 
-- Contract owner: [transports/streaming-health.md](../transports/streaming-health.md#image-bearing-canonical-turns)
+- Contract owner: [data-planes/images.md](../data-planes/images.md#responses-input-image-boundaries)
 
 ## Decision record
 

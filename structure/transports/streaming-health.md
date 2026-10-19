@@ -17,6 +17,8 @@ terminal on drift; see [continuation binding contract](../providers-and-adapters
 
 Shared parsing and streaming follow the [request-copy](byte-accounting.md#request-copy-accounting) and [stream-buffer accounting](byte-accounting.md#stream-buffer-accounting) contracts. Response-attached WebSocket telemetry follows the [stage record identity contract](responses-wire-shapes.md#passthrough-sse-stream-shapes-314).
 
+Responses WebSocket terminal frames normalize known `incomplete_details.reason` aliases under the [incomplete reason contract](responses-wire-shapes.md#adapter-incomplete-reasons), including native control chains.
+
 ## Heartbeat and stall deadline
 
 RunTurn search interception forwards adapter heartbeats immediately and emits progress for buffered semantic events. Its bridge uses the search plan's stall deadline so a bounded sidecar search fits the watchdog budget.
@@ -244,30 +246,47 @@ returns the same downstream SSE contract. The canonical `openai` provider uses
 upstream WebSocket by default; `providers.openai.upstreamWebsocket: false` sends
 its streaming turns over HTTP/SSE instead. This explicit choice also makes
 native mid-turn steering and injection unavailable on that provider. It does
-not change the endpoint, credential, or downstream event format. Canonical
-ChatGPT input containing an `input_image` or `computer_screenshot` is excluded
-before dialing and retains HTTP/SSE; explicitly opted-in noncanonical gateways
-retain their own WS policy.
+not change the endpoint, credential, or downstream event format.
 Its WSS route checks NO_PROXY first, then selects the
 first non-empty HTTPS_PROXY, https_proxy, ALL_PROXY, or all_proxy value. HTTP_PROXY alone does not
 route WSS. Unsupported or malformed selected proxy values skip the WebSocket attempt and use the
 existing SSE path immediately; they never fall through to a lower-priority proxy or direct WebSocket
 egress. HTTP/SSE fallback retains Bun fetch's own proxy rules, which do not consult ALL_PROXY.
 
-### Image-bearing canonical turns
-
-The pre-dial exclusion above is one of two image boundaries on the canonical Responses path. The
-other sits at parsing: once the latest completed compact-wire item exists, earlier `input_image`
-blocks in schema-compatible message and tool-output arrays are copy-on-write replaced with a fixed
-text marker, so later turns and the process-local continuation cache stop carrying historical
-image bytes. Newer images survive, a `compaction_trigger` alone is not success, and the client's
-own transcript is never rewritten.
-
-> Decision record: [ADR-0123](../decisions/ADR-0123-responses-http-sse.md)
-
-> Decision record: [ADR-0124](../decisions/ADR-0124-responses-http-sse.md)
 The endpoint handles `response.create`, ignores `response.processed`, supports warmup
 `generate: false`, and feeds the same request pipeline as HTTP/SSE.
+
+Incoming Responses connections share a 128-socket admission limit. Only when a new upgrade
+finds that limit full, the handler reclaims the least recently used eligible idle connection.
+Message handling and turn completion refresh a monotonic use order; connection age alone
+does not choose the victim. Eligibility requires an open socket, no active turn, no pending
+client tool or approval result, no retained native steering/injection owner, and no buffered
+outbound bytes. A superseded turn remains active until its own cleanup finishes.
+
+Tool and approval identities are tracked across output items and terminal snapshots. Function argument
+and custom-tool input completion also establish waits, correlated through `response.output_item.added`,
+even if EOF precedes the completed item or terminal. An added item with unfinished arguments alone
+establishes no wait. Only matching client or upstream results retire waits, suppressing completion echoes.
+Tracking retains bounded identity hashes; overflow or ambiguous completion identities protect the
+connection until close. A terminal does not make a connection idle while its client tool runs.
+
+The tracker reuses the final route's provider-executed tool classification, including declarations
+injected into the outbound request. `src/server/responses/response-tool-ownership.ts` carries that
+classification with the selected Response through body wrappers; failed combo attempts cannot
+authorize the winning response's calls. Hosted xAI search therefore creates no client-result wait.
+Each admitted ordinary turn starts a fresh returned-result deduplication scope after settling prior
+results, even if its upstream omits `response.created`. Native control keeps same-response echo
+suppression. `tests/responses/ws-capacity-tool-ownership.test.ts` covers these ownership boundaries.
+
+The victim is marked closing before sending close code 1001 with reason
+`Idle Responses connection reclaimed`. Only its ordinary close callback releases the
+admission lease. After requesting closure, the current upgrade immediately attempts reservation once.
+If every socket is protected, the close fails, or the callback has not yet released the lease,
+that upgrade receives the existing HTTP 503 `Codex WebSockets capacity reached` response.
+A later upgrade can acquire the released slot; admission never exceeds the limit. Reclamation
+does not delete saved continuation state; a client can reconnect through the existing upgrade
+and replay path. This policy adds no idle timer or configuration and does not change the
+separate Live/Realtime sockets or upstream connection reuse. Client disconnect releases socket admission independently of upstream cleanup: the eager relay may continue its existing bounded post-cancel drain for up to 15 seconds to observe a real terminal while a replacement socket already completes new work.
 
 Registry-declared per-model compatibility hints (`modelResponsesUpstreamStreaming`) may ask the
 upstream Responses endpoint for bounded JSON on ANY client transport — WebSocket or ordinary

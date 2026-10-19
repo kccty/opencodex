@@ -1640,7 +1640,7 @@ describe("combo validation and normalization", () => {
       nativeAlias: false,
       ambiguousFailover: false,
       displayName: null,
-      targets: [{ provider: "a", model: "m1", weight: 2, lastResort: false }],
+      targets: [{ provider: "a", model: "m1", weight: 2, lastResort: false, metered: false }],
     });
     expect(normalizeComboConfig({ targets: [{ provider: "a", model: "m1" }] }).defaultEffort).toBeNull();
     const targetReasoningEfforts: OcxComboDefaultEffort[] = ["low", "high"];
