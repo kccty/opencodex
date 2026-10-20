@@ -443,13 +443,6 @@ export const zhTW: Record<TKey, string> = {
   "compactionRouting.loadFailed": "無法載入壓縮設定。",
   "compactionRouting.saved": "壓縮設定已儲存。",
   "compactionRouting.saveFailed": "儲存失敗。變更仍然保留，請重試。",
-  "autoReviewModel.title": "自動審批模型",
-  "autoReviewModel.description": "負責評審審批請求的模型。切換立即生效——下一次評審直接路由到所選模型，無需重啟 Codex。",
-  "autoReviewModel.default": "Codex 內建（codex-auto-review）",
-  "autoReviewModel.saved": "已儲存。",
-  "autoReviewModel.saveFailed": "儲存失敗。",
-  "autoReviewModel.loadFailed": "無法讀取目前審稿模型。",
-
   "memoryModels.title": "記憶路由",
   "memoryModels.description": "工作階段結束後，Codex 會在背景寫入記憶。為每個階段選擇模型，或保留現有路由。",
   "memoryModels.infoLabel": "Extract 和 Consolidation 是什麼？",

@@ -567,13 +567,6 @@ export const ru: Record<TKey, string> = {
   "compactionRouting.loadFailed": "Не удалось загрузить настройки сжатия.",
   "compactionRouting.saved": "Настройки сжатия сохранены.",
   "compactionRouting.saveFailed": "Не удалось сохранить. Изменения остались; попробуйте снова.",
-  "autoReviewModel.title": "Модель авторевью",
-  "autoReviewModel.description": "Модель, проверяющая запросы на подтверждение. Переключение применяется сразу: следующая проверка уходит на выбранную модель, без перезапуска Codex.",
-  "autoReviewModel.default": "Встроенная Codex (codex-auto-review)",
-  "autoReviewModel.saved": "Сохранено.",
-  "autoReviewModel.saveFailed": "Не удалось сохранить.",
-  "autoReviewModel.loadFailed": "Не удалось загрузить текущую модель ревью.",
-
   "memoryModels.title": "Маршрутизация памяти",
   "memoryModels.description": "Codex пишет память в фоне после завершения сессии. Выберите модель для каждого этапа или сохраните текущий маршрут.",
   "memoryModels.infoLabel": "Что такое Extract и Consolidation?",

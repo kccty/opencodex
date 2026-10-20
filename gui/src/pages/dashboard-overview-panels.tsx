@@ -1,5 +1,4 @@
 import CompactionRoutingPanel from "../components/CompactionRoutingPanel";
-import AutoReviewModelPanel from "../components/AutoReviewModelPanel";
 import ReasoningRetentionPanel from "../components/ReasoningRetentionPanel";
 import MemoryObservabilityCard from "../components/MemoryObservabilityCard";
 import MemoryModelsPanel from "../components/MemoryModelsPanel";
@@ -26,7 +25,6 @@ export function DashboardOverviewPanels(props: Dash) {
       <CompactionRoutingPanel apiBase={props.apiBase} models={props.models} providers={props.providers} />
       <NativeReasoningRetentionPanel apiBase={props.apiBase} />
       <MemoryModelsPanel apiBase={props.apiBase} models={props.models} />
-      <AutoReviewModelPanel apiBase={props.apiBase} models={props.models} />
       <MemoryObservabilityCard apiBase={props.apiBase} />
       <ReasoningRetentionPanel apiBase={props.apiBase} />
     </>

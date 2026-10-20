@@ -576,13 +576,6 @@ export const en = {
   "compactionRouting.loadFailed": "Could not load compaction settings.",
   "compactionRouting.saved": "Compaction settings saved.",
   "compactionRouting.saveFailed": "Could not save. Your changes are still here; try again.",
-  "autoReviewModel.title": "Auto review model",
-  "autoReviewModel.description": "The model that reviews approval requests. Switching takes effect immediately — the next review is routed to the selected model, with no Codex restart.",
-  "autoReviewModel.default": "Codex built-in (codex-auto-review)",
-  "autoReviewModel.saved": "Saved.",
-  "autoReviewModel.saveFailed": "Saving failed.",
-  "autoReviewModel.loadFailed": "Could not load the current reviewer.",
-
   "memoryModels.title": "Memory routing",
   "memoryModels.description": "Codex writes memories after a session ends. Choose a model for either phase, or keep its existing route.",
   "memoryModels.infoLabel": "What are Extract and Consolidation?",

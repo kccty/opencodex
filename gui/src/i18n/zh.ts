@@ -562,13 +562,6 @@ export const zh: Record<TKey, string> = {
   "compactionRouting.loadFailed": "无法加载压缩设置。",
   "compactionRouting.saved": "压缩设置已保存。",
   "compactionRouting.saveFailed": "保存失败。更改仍然保留，请重试。",
-  "autoReviewModel.title": "自动审批模型",
-  "autoReviewModel.description": "负责评审审批请求的模型。切换立即生效——下一次评审直接路由到所选模型，无需重启 Codex。",
-  "autoReviewModel.default": "Codex 内置（codex-auto-review）",
-  "autoReviewModel.saved": "已保存。",
-  "autoReviewModel.saveFailed": "保存失败。",
-  "autoReviewModel.loadFailed": "无法读取当前审稿模型。",
-
   "memoryModels.title": "记忆路由",
   "memoryModels.description": "会话结束后，Codex 会在后台写入记忆。为每个阶段选择模型，或保留现有路由。",
   "memoryModels.infoLabel": "Extract 和 Consolidation 是什么？",

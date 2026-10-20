@@ -1597,16 +1597,6 @@ global override is available in Model settings. The canonical `openai` provider 
 reviewer fields. Field-by-field rules live in the
 [provider configuration reference](/reference/configuration/providers/#auto-review-approval-model-selection).
 
-### Switching the reviewer without a restart
-
-The Dashboard's overview page has an **Auto review model** selector that switches the reviewer
-hot. It maintains the `codex-auto-review` entry in `blockedModelRedirects`, which the routing
-layer applies to the next review request immediately: no Codex restart, no catalog re-sync, and
-no write into Codex's own `config.toml`. Selecting the built-in option removes the entry and
-restores upstream reviewer routing. This is the mechanism to use while iterating — the
-`auto_review_model` stamp above is the durable source-side configuration, but it only takes
-effect once Codex reloads its catalog.
-
 ## Rate limits in the providers overview
 
 The **Rate limits** section of the Providers overview shows live utilization

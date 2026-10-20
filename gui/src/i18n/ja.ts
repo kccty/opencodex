@@ -567,13 +567,6 @@ export const ja: Record<TKey, string> = {
   "compactionRouting.loadFailed": "圧縮設定を読み込めませんでした。",
   "compactionRouting.saved": "圧縮設定を保存しました。",
   "compactionRouting.saveFailed": "保存できませんでした。変更内容は保持されています。再試行してください。",
-  "autoReviewModel.title": "自動レビューモデル",
-  "autoReviewModel.description": "承認リクエストを審査するモデルです。切り替えは即時反映され、次のレビューは選択したモデルへルーティングされます。Codex の再起動は不要です。",
-  "autoReviewModel.default": "Codex 内蔵（codex-auto-review）",
-  "autoReviewModel.saved": "保存しました。",
-  "autoReviewModel.saveFailed": "保存に失敗しました。",
-  "autoReviewModel.loadFailed": "現在のレビューモデルを読み込めません。",
-
   "memoryModels.title": "メモリルーティング",
   "memoryModels.description": "Codex はセッション終了後にバックグラウンドでメモリを書き込みます。各段階のモデルを選ぶか、現在のルートを維持します。",
   "memoryModels.infoLabel": "Extract と Consolidation とは？",

@@ -568,13 +568,6 @@ export const tr: Record<TKey, string> = {
   "compactionRouting.loadFailed": "Özetleme ayarları yüklenemedi.",
   "compactionRouting.saved": "Özetleme ayarları kaydedildi.",
   "compactionRouting.saveFailed": "Kaydedilemedi. Değişiklikleriniz korunuyor; tekrar deneyin.",
-  "autoReviewModel.title": "Otomatik inceleme modeli",
-  "autoReviewModel.description": "Onay isteklerini inceleyen model. Değişiklik anında geçerlidir — sonraki inceleme seçilen modele yönlendirilir, Codex'i yeniden başlatmak gerekmez.",
-  "autoReviewModel.default": "Codex yerleşik (codex-auto-review)",
-  "autoReviewModel.saved": "Kaydedildi.",
-  "autoReviewModel.saveFailed": "Kaydedilemedi.",
-  "autoReviewModel.loadFailed": "Geçerli inceleme modeli yüklenemedi.",
-
   "memoryModels.title": "Bellek yönlendirmesi",
   "memoryModels.description": "Codex, oturum bittikten sonra belleği arka planda yazar. Her aşama için model seçin veya mevcut yönlendirmeyi koruyun.",
   "memoryModels.infoLabel": "Extract ve Consolidation nedir?",

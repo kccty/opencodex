@@ -558,13 +558,6 @@ export const de: Record<TKey, string> = {
   "compactionRouting.loadFailed": "Komprimierungseinstellungen konnten nicht geladen werden.",
   "compactionRouting.saved": "Komprimierungseinstellungen gespeichert.",
   "compactionRouting.saveFailed": "Speichern fehlgeschlagen. Deine Änderungen sind noch vorhanden; versuche es erneut.",
-  "autoReviewModel.title": "Modell für automatische Prüfung",
-  "autoReviewModel.description": "Das Modell, das Freigabeanforderungen prüft. Der Wechsel wirkt sofort — die nächste Prüfung läuft auf dem gewählten Modell, ganz ohne Codex-Neustart.",
-  "autoReviewModel.default": "Codex-integriert (codex-auto-review)",
-  "autoReviewModel.saved": "Gespeichert.",
-  "autoReviewModel.saveFailed": "Speichern fehlgeschlagen.",
-  "autoReviewModel.loadFailed": "Aktuelles Prüfmodell konnte nicht geladen werden.",
-
   "memoryModels.title": "Memory-Routing",
   "memoryModels.description": "Codex schreibt Memories nach einer Sitzung im Hintergrund. Wähle für jede Phase ein Modell oder behalte die bestehende Route bei.",
   "memoryModels.infoLabel": "Was sind Extract und Consolidation?",

@@ -566,13 +566,6 @@ export const fr: Record<TKey, string> = {
   "compactionRouting.loadFailed": "Impossible de charger les paramètres de compaction.",
   "compactionRouting.saved": "Paramètres de compaction enregistrés.",
   "compactionRouting.saveFailed": "Échec de l’enregistrement. Vos modifications sont conservées ; réessayez.",
-  "autoReviewModel.title": "Modèle de révision automatique",
-  "autoReviewModel.description": "Le modèle qui examine les demandes d'approbation. Le changement est immédiat — la prochaine révision est routée vers le modèle choisi, sans redémarrer Codex.",
-  "autoReviewModel.default": "Intégré à Codex (codex-auto-review)",
-  "autoReviewModel.saved": "Enregistré.",
-  "autoReviewModel.saveFailed": "Échec de l'enregistrement.",
-  "autoReviewModel.loadFailed": "Impossible de charger le réviseur actuel.",
-
   "memoryModels.title": "Routage de la mémoire",
   "memoryModels.description": "Codex écrit les mémoires en arrière-plan après la session. Choisissez un modèle pour chaque étape ou conservez son routage actuel.",
   "memoryModels.infoLabel": "Que sont Extract et Consolidation ?",

@@ -562,13 +562,6 @@ export const ko: Record<TKey, string> = {
   "compactionRouting.loadFailed": "압축 설정을 불러올 수 없습니다.",
   "compactionRouting.saved": "압축 설정을 저장했습니다.",
   "compactionRouting.saveFailed": "저장하지 못했습니다. 변경 사항은 유지됩니다. 다시 시도하세요.",
-  "autoReviewModel.title": "자동 검토 모델",
-  "autoReviewModel.description": "승인 요청을 검토하는 모델입니다. 전환은 즉시 적용되어 다음 검토가 선택한 모델로 라우팅됩니다. Codex 재시작은 필요하지 않습니다.",
-  "autoReviewModel.default": "Codex 내장(codex-auto-review)",
-  "autoReviewModel.saved": "저장했습니다.",
-  "autoReviewModel.saveFailed": "저장하지 못했습니다.",
-  "autoReviewModel.loadFailed": "현재 검토 모델을 불러올 수 없습니다.",
-
   "memoryModels.title": "메모리 라우팅",
   "memoryModels.description": "Codex는 세션이 끝난 뒤 백그라운드에서 메모리를 작성합니다. 각 단계의 모델을 고르거나 기존 경로를 유지하세요.",
   "memoryModels.infoLabel": "Extract와 Consolidation이 무엇인가요?",
