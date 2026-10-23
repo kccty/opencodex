@@ -101,6 +101,7 @@ import type {
   CatalogTrustedOpenAiApiPolicySnapshot,
 } from "../convergence-types";
 import { applyProviderConfigHints, configuredAutoCompactTokenLimit, positiveSafeInteger, withVisionSidecarInput } from "./model-hints";
+import { codexControlPlaneModelCapabilities } from "./control-plane-capabilities";
 
 /** Model ids each provider must retain for combo catalog derivation (OCX-111). */
 export function configuredComboTargetModelsByProvider(
@@ -221,9 +222,11 @@ export function resolveComboCatalogMember(
   metadataConfigDir?: string,
   visionSidecarEnabled = true,
 ): CatalogModel | undefined {
-  const existing = memberByKey.get(targetKey(target));
   const prov = providers.get(target.provider);
-  const fallback = callerFallback ?? vendorMetadataComboFallback(target);
+  const controlPlane = codexControlPlaneModelCapabilities(target.provider, prov, target.model, contextCap);
+  const existing = memberByKey.get(targetKey(target)) ?? (controlPlane
+    ? { id: target.model, provider: target.provider, ...controlPlane } : undefined);
+  const fallback: ComboCatalogMemberFallback | undefined = controlPlane ?? callerFallback ?? vendorMetadataComboFallback(target);
   // Disabled providers never contribute members — even a complete discovery row
   // is unusable for catalog derivation while the provider is off.
   if (prov?.disabled === true) return undefined;

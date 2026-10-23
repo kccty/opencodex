@@ -6,6 +6,8 @@ import { isReserveCatalogProjection } from "./reserve";
 import { pinnedNativeModelRows } from "./pinned-models";
 import type { RawEntry } from "./parsing";
 
+export { codexControlPlaneModelCapabilities, type CodexControlPlaneModelCapabilities } from "./control-plane-capabilities";
+
 /** Hidden ordinary natives qualify; Reserve, account choices and routed aliases do not. */
 export function hasOrdinaryNativeOpenAiRow(entries: readonly RawEntry[]): boolean {
   return entries.some(entry => typeof entry.slug === "string"

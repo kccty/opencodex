@@ -606,6 +606,11 @@ without an ordinary bare native row, including Reserve-only catalogs, omit it an
 Codex's fallback to the task model. The reviewer receives the same multi-agent mode projection
 as ordinary native rows.
 
+The dashboard's Combo target picker can select this internal model without making it public.
+With native OpenAI enabled, combine `openai/codex-auto-review` with another configured
+approval model and select the resulting `combo/<id>` as the global auto-review override.
+The ordinary model inventory, public `/v1/models`, and subagent choices remain unchanged.
+
 `autoReviewModel` is the provider-wide reviewer target. A value can be a bare model id of that same
 provider (the catalog row is normalized to the `provider/model` slug) or a full public catalog
 slug such as `opencode-go/deepseek-v4-flash`. A bare value resolves against that provider's rows

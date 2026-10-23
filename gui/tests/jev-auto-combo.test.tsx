@@ -315,7 +315,7 @@ test("configured JEV deep-link opens the shared editable Combo modal and submits
           },
         });
       }
-      if (url.endsWith("/api/models")) return Response.json(models);
+      if (url.endsWith("/api/models?includeInternalApproval=true")) return Response.json(models);
       if (url.endsWith("/api/provider-quotas")) return Response.json({ reports: [] });
       throw new Error(`unexpected request: ${url}`);
     },

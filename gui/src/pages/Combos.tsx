@@ -92,7 +92,7 @@ export default function Combos({
   onCountChange?: (count: number) => void;
 }) {
   const t = useT();
-  const cacheKey = `ocx.combos.workspace.v2:${apiBase}`;
+  const cacheKey = `ocx.combos.workspace.v3:${apiBase}`;
   const cached = useMemo(() => seedCombos(cacheKey), [cacheKey]);
 
   /*
@@ -147,7 +147,7 @@ export default function Combos({
       // Signals were missing entirely, so resource cleanup could not cancel these.
       fetch(`${apiBase}/api/combos`, { signal }),
       fetch(`${apiBase}/api/config`, { signal }),
-      fetch(`${apiBase}/api/models`, { signal }),
+      fetch(`${apiBase}/api/models?includeInternalApproval=true`, { signal }),
     ]);
     if (!combosRes.ok || !configRes.ok || !modelsRes.ok) {
       throw new Error("combo workspace load failed");

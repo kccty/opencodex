@@ -21,6 +21,10 @@ import { repoPath, repoRoot } from "../helpers/repo-root";
 import { CODEX_INTERNAL_OPENAI_MODELS } from "../../src/codex/control-plane-models";
 import { NoEnabledOpenAiProviderError, routeModel } from "../../src/router";
 import type { OcxConfig } from "../../src/types";
+import { codexControlPlaneModelCapabilities } from "../../src/codex/catalog/control-plane";
+import { resolveComboCatalogMember } from "../../src/codex/catalog/combo-member";
+import { deriveComboCatalogModel } from "../../src/codex/catalog/aggregation";
+import { advanceComboAfterFailure, clearComboSelectionState, clearComboTargetCooldowns, comboConfigIssues, comboFailureDecision, normalizeComboConfig } from "../../src/combos";
 
 const reviewer = "codex-auto-review";
 const upstream = snapshot.models.find(row => row.slug === reviewer)!;
@@ -219,6 +223,75 @@ test("router keeps the exact reviewer wire id and fails without canonical OpenAI
   expect(readFileSync(repoPath("src/router.ts"), "utf8")).toMatch(/import\s*\{[^}]*\bCODEX_INTERNAL_OPENAI_MODELS\b[^}]*\}\s*from\s*["']\.\/codex\/control-plane-models["']/);
   expect(routeModel(nativeConfig, reviewer)).toMatchObject({ providerName: "openai", modelId: reviewer });
   expect(() => routeModel(otherConfig, reviewer)).toThrow(NoEnabledOpenAiProviderError);
+});
+
+test("private approval capabilities use the pin without granting public native authority", () => {
+  const provider = nativeConfig.providers.openai!;
+  const capabilities = codexControlPlaneModelCapabilities("openai", provider, reviewer)!;
+  expect(capabilities).toMatchObject({
+    contextWindow: upstream.context_window, maxInputTokens: upstream.context_window,
+    inputModalities: upstream.input_modalities, defaultReasoningEffort: upstream.default_reasoning_level,
+    reasoningEfforts: upstream.supported_reasoning_levels.map(level => level.effort),
+  });
+  capabilities.reasoningEfforts.length = 0;
+  expect(codexControlPlaneModelCapabilities("openai", provider, reviewer)!.reasoningEfforts).toContain("max");
+  expect(codexControlPlaneModelCapabilities("openai", { ...provider, authMode: undefined }, reviewer)).toBeDefined();
+  for (const candidate of [
+    { ...provider, disabled: true }, { ...provider, authMode: "key" as const },
+    { ...provider, baseUrl: "https://provider.invalid/v1" },
+  ]) expect(codexControlPlaneModelCapabilities("openai", candidate, reviewer)).toBeUndefined();
+  expect(codexControlPlaneModelCapabilities("V-API", provider, reviewer)).toBeUndefined();
+  expect(codexControlPlaneModelCapabilities("openai", provider, "gpt-5.5")).toBeUndefined();
+  expect(codexControlPlaneModelCapabilities("openai", undefined, reviewer)).toBeUndefined();
+  expect(SUPPORTED_NATIVE_OPENAI_SLUGS.has(reviewer)).toBe(false);
+  expect(upstreamNativeEntry(reviewer)).toBeNull();
+});
+
+test("approval capabilities and combo members preserve native caps and exact effort metadata", () => {
+  const provider = { ...nativeConfig.providers.openai!, modelContextWindows: { [reviewer]: 200_000 } };
+  const capabilities = codexControlPlaneModelCapabilities("openai", provider, reviewer, 180_000)!;
+  expect(capabilities).toMatchObject({ contextWindow: 180_000, maxInputTokens: 180_000 });
+  expect(capabilities.autoCompactTokenLimit).toBeLessThanOrEqual(180_000);
+  expect(codexControlPlaneModelCapabilities("openai", { ...provider, modelContextWindows: { [reviewer]: 1_000_000 } }, reviewer)!.contextWindow).toBe(upstream.context_window);
+  const member = resolveComboCatalogMember({ provider: "openai", model: reviewer }, new Map(), new Map([["openai", provider]]), 180_000)!;
+  expect(member).toMatchObject({ ...capabilities, provider: "openai", id: reviewer });
+  const apiProvider = { adapter: "openai-responses" as const, baseUrl: "https://provider.invalid/v1", liveModels: false };
+  const apiMember = resolveComboCatalogMember({ provider: "V-API", model: reviewer }, new Map(), new Map([["V-API", apiProvider]]))!;
+  expect(apiMember.contextWindow).toBe(128_000);
+  expect(apiMember.inputModalities).toEqual(["text"]);
+  expect(apiMember.defaultReasoningEffort).toBeUndefined();
+  const combo = normalizeComboConfig({ strategy: "failover", targets: [{ provider: "openai", model: reviewer }, { provider: "V-API", model: reviewer }] });
+  expect(deriveComboCatalogModel("approval", combo, [member, apiMember])).toMatchObject({
+    provider: "combo", id: "approval", contextWindow: 128_000,
+    reasoningEfforts: upstream.supported_reasoning_levels.map(level => level.effort),
+  });
+});
+
+test("approval override selects a failover combo and retains concrete wire ids without recursion", () => {
+  const id = "auto-review-routing";
+  const config: OcxConfig = { ...structuredClone(nativeConfig), providers: {
+    ...nativeConfig.providers,
+    "V-API": { adapter: "openai-responses", baseUrl: "https://provider.invalid/v1", liveModels: false },
+  }, combos: { [id]: { strategy: "failover", targets: [
+    { provider: "openai", model: reviewer }, { provider: "V-API", model: reviewer },
+  ] } } };
+  expect(comboConfigIssues(id, config.combos![id], config.providers)).toEqual([]);
+  const rows = [...merge(), { slug: `combo/${id}`, visibility: "list" }];
+  const internalBefore = structuredClone(reviewRow(rows));
+  expect(applyAutoReviewModelOverride(rows, `combo/${id}`)).toBe("applied");
+  expect(rows.find(row => row.slug === "gpt-5.5")!.auto_review_model_override).toBe(`combo/${id}`);
+  expect(reviewRow(rows)).toEqual(internalBefore);
+  try {
+    const first = routeModel(config, `combo/${id}`);
+    expect(first).toMatchObject({ providerName: "openai", modelId: reviewer, routeKind: "combo" });
+    expect(comboFailureDecision(429, "Too Many Requests")).toBe("hop");
+    const second = advanceComboAfterFailure(config, first.combo!, { status: 429, message: "Too Many Requests" })!;
+    expect(second.target).toMatchObject({ provider: "V-API", model: reviewer });
+    expect(second.attempted).toEqual([`openai/${reviewer}`, `V-API/${reviewer}`]);
+    expect(routeModel(config, `V-API/${reviewer}`)).toMatchObject({ providerName: "V-API", modelId: reviewer });
+    // A completed approval denial is a valid result, never a reason to seek another verdict.
+    expect(comboFailureDecision(200, JSON.stringify({ decision: "deny" }))).toBe("stop");
+  } finally { clearComboSelectionState(id); clearComboTargetCooldowns(id); }
 });
 
 for (const writer of ["retained-sync", "convergence"] as const) {

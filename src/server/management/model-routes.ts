@@ -381,7 +381,9 @@ export async function handleModelRoutes(ctx: ManagementContext): Promise<Respons
   }
 
   if (url.pathname === "/api/models" && req.method === "GET") {
-    return jsonResponse(await listManagementModelRows(config));
+    return jsonResponse(await listManagementModelRows(config, {
+      includeInternalApproval: url.searchParams.get("includeInternalApproval") === "true",
+    }));
   }
 
   const modelCostsMatch = url.pathname.match(/^\/api\/providers\/([^/]+)\/model-costs$/);

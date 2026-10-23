@@ -461,7 +461,7 @@ Chat helper admission in `src/server/responses/core.ts` follows the [deferred st
 
 ## Combo editor routing quota
 
-`gui/src/pages/Combos.tsx` supplies all non-Combo management catalog rows to internal model selectors, including hidden models. Catalog visibility does not restrict Combo member or JEV decision-model selection and selecting a hidden model does not change its external visibility. Disabled-provider, decision-service and recursion exclusions remain unchanged; the v2 workspace cache avoids reusing v1 visibility-filtered candidates.
+`gui/src/pages/Combos.tsx` supplies all non-Combo management catalog rows to internal model selectors, including hidden models. It opts into `GET /api/models?includeInternalApproval=true` for the native approval reviewer; normal model lists and client exports do not. Catalog visibility does not restrict Combo member or JEV decision-model selection and selecting a hidden model does not change its external visibility. Disabled-provider, decision-service and recursion exclusions remain unchanged; the v3 workspace cache avoids reusing older candidates that omitted the internal reviewer. A saved Combo remains selectable as the global auto-review override.
 
 `src/server/management/provider-routes.ts` projects `routingQuota` after each quota read using the current provider
 configuration and [scoped inference evidence](runtime.md#scoped-provider-quota-for-combo-selection). The DTO carries only state,

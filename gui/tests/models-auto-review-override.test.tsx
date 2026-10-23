@@ -63,3 +63,12 @@ test("the override dropdown offers routed rows and keeps a saved native value vi
   expect(routedModelOptions(visible, models, "gpt-5.6-sol").map(option => option.value).sort())
     .toEqual(["9router/ocg-muse-spark-1.3-contributor", "gpt-5.6-sol"]);
 });
+
+test("a virtual approval model is selectable and summarized as the global reviewer", () => {
+  const selector = "combo/approval";
+  const models = [row({ provider: "combo", id: "approval", namespaced: selector })];
+  const visible = [{ value: selector, label: "approval" }];
+  expect(routedModelOptions(visible, models)).toEqual(visible);
+  expect(modelsSettingsSummary(t, { ...base, autoReviewEnabled: true, autoReviewModel: selector })
+    .find(item => item.id === "auto-review")?.value).toBe(selector);
+});
