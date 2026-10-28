@@ -645,7 +645,7 @@ of model pickers, subagent choices, Desktop lists and public `/v1/models` lists.
 root reviewer overrides retain their precedence and do not stamp this internal row. Catalogs
 without an ordinary bare native row, including Reserve-only catalogs, omit it and preserve
 Codex's fallback to the task model. The reviewer receives the same multi-agent mode projection
-as ordinary native rows.
+as ordinary native rows. The dashboard's Combo target picker can select this internal model without making it public. With native OpenAI enabled, combine `openai/codex-auto-review` with another configured approval model and select the resulting `combo/<id>` as the global auto-review override. The ordinary model inventory, public `/v1/models`, and subagent choices remain unchanged.
 
 `autoReviewModel` is the provider-wide reviewer target. A value can be a bare model id of that same
 provider (the catalog row is normalized to the `provider/model` slug) or a full public catalog

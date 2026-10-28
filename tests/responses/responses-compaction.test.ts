@@ -6,12 +6,14 @@ import { CODEX_FORWARD_BASE_URL } from "../../src/providers/openai-tiers";
 import { parseRequest } from "../../src/responses/parser";
 import {
   COMPACT_PROMPT,
+  COMPACTED_HISTORY_IMAGE_OMITTED,
   OPAQUE_COMPACTION_NOTE,
   SUMMARY_PREFIX,
   buildCompactV1Output,
   decodeCompactionSummary,
   encodeCompactionSummary,
   extractCompactUserMessages,
+  omitHistoricalImagesBeforeLastCompaction,
 } from "../../src/responses/compaction";
 import type { AdapterEvent, OcxMessage } from "../../src/types";
 import { COMPACTION_IMAGE_NOTE, omitEarlierCompactionImages } from "../../src/responses/compaction-images";
@@ -609,5 +611,75 @@ describe("remote compaction v1 helpers (260707 Design-B sweep)", () => {
     const first = retained.charCodeAt(0);
     expect(first >= 0xdc00 && first <= 0xdfff).toBe(false);
     expect(retained.includes("\uFFFD")).toBe(false);
+  });
+});
+
+describe("historical image expiry at compaction", () => {
+  const imagePart = { type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgo=" };
+
+  function bodyWithCompaction() {
+    return {
+      model: "gpt-5.5",
+      stream: true,
+      input: [
+        { role: "user", content: [{ type: "input_text", text: "look" }, imagePart] },
+        { type: "function_call_output", call_id: "c1", output: [imagePart] },
+        { type: "compaction", encrypted_content: "ocx1:eHl6" },
+        { role: "user", content: [{ type: "input_text", text: "after" }, imagePart] },
+      ],
+    };
+  }
+
+  test("images before the newest completed compaction item are replaced, later ones stay", () => {
+    const { body, omittedImages } = omitHistoricalImagesBeforeLastCompaction(bodyWithCompaction());
+    expect(omittedImages).toBe(2);
+    const input = (body as { input: unknown[] }).input;
+    const before = input[0] as { content: { type: string; text?: string }[] };
+    expect(before.content[1]).toEqual({ type: "input_text", text: COMPACTED_HISTORY_IMAGE_OMITTED });
+    const toolOutput = input[1] as { output: { type: string; text?: string }[] };
+    expect(toolOutput.output[0]).toEqual({ type: "input_text", text: COMPACTED_HISTORY_IMAGE_OMITTED });
+    // The compaction item itself and post-boundary images are untouched.
+    expect(input[2]).toEqual({ type: "compaction", encrypted_content: "ocx1:eHl6" });
+    const after = input[3] as { content: unknown[] };
+    expect(after.content[1]).toBe(imagePart);
+  });
+
+  test("no completed compaction marker leaves the body untouched", () => {
+    const body = bodyWithCompaction();
+    (body.input as unknown[]).splice(2, 1);
+    const original = body.input;
+    const result = omitHistoricalImagesBeforeLastCompaction(body);
+    expect(result.body).toBe(body);
+    expect(result.omittedImages).toBe(0);
+    expect(body.input).toBe(original);
+  });
+
+  test("a compaction_trigger alone is not a boundary", () => {
+    const body = {
+      model: "gpt-5.5",
+      stream: true,
+      input: [
+        { role: "user", content: [imagePart] },
+        { type: "compaction_trigger" },
+      ],
+    };
+    const result = omitHistoricalImagesBeforeLastCompaction(body);
+    expect(result.body).toBe(body);
+    expect(result.omittedImages).toBe(0);
+  });
+
+  test("parseRequest sanitizes before parsing so translated paths never see stale image bytes", () => {
+    const parsed = parseRequest({
+      model: "gpt-5.5",
+      stream: true,
+      input: [
+        { role: "user", content: [{ type: "input_text", text: "look" }, imagePart] },
+        { type: "compaction", encrypted_content: encodeCompactionSummary("did X") },
+        { role: "user", content: [{ type: "input_text", text: "continue" }] },
+      ],
+    });
+    const serialized = JSON.stringify(parsed.context.messages);
+    expect(serialized).toContain(COMPACTED_HISTORY_IMAGE_OMITTED);
+    expect(serialized).not.toContain("iVBORw0KGgo");
   });
 });

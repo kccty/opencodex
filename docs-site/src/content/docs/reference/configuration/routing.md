@@ -26,7 +26,7 @@ alias would produce an unparseable synthetic Fast selector. Codex's own model ca
 ### Codex Pool low-quota protection
 
 `codexPool.lowQuotaProtection` applies only to stored Codex Pool accounts. The Desktop/main
-account keeps its separate 98% hard lock. The optional shape is:
+account keeps its separate 95% hard lock. The optional shape is:
 
 ```json
 {"codexPool":{"lowQuotaProtection":{"enabled":true,"threshold":80,"actions":{"pause":true,"notify":true,"desktop":true},"windows":{"short":true,"weekly":true}}}}
@@ -168,7 +168,7 @@ namespace, and cannot use reserved bare native families such as `gpt-*`, `o1-*`,
 | `cooldownWaitPolicy?` | `"before-last-resort"` | unset | Defers targets marked `lastResort`: they are used only when no normal target is available, for every strategy. `waitForCooldownMs` only adds the wait for a cooling normal target, so at its `0` default nothing waits and the last resort is used as soon as no normal target is available. The deferral and the ordinary wait share one `waitForCooldownMs` budget per selection attempt. Only that exact string opts in; `lastResort` is inert without it. |
 | `defaultEffort?` | `"low" \| "medium" \| "high" \| "xhigh" \| "max" \| "ultra" \| null` | unset | `defaultEffort` fills an absent `reasoning.effort` in fallback mode, or overrides valid caller effort in explicit force mode when the combo has a non-null default and the selected target has a known, nonempty supported ladder. If the target supports the configured value, it is retained; otherwise the highest supported rung at or below it is used, or the lowest supported rung when none is lower. Unknown or empty ladders omit the default. |
 | `defaultEffortMode?` | `"fallback" \| "force"` | `"fallback"` | Preserves caller precedence by default. Explicit force requires a valid non-null default, respects target capability and can increase cost and latency. `reasoningEffortMode` remains independent. |
-| `reasoningEffortMode?` | `"strict" \| "adaptive"` | `"strict"` | `"strict"` intersects all known target ladders, including empty ones; `"adaptive"` excludes empty ladders. Unknown ladders are catalog wildcards in both modes. At dispatch, explicit empty ladders remove effort/thinking controls in both modes; unknown ladders do so only in adaptive. `reasoning.summary` is preserved. Known nonempty targets retain their effort resolution, and target selection/order is unchanged. |
+| `reasoningEffortMode?` | `"strict" \| "adaptive"` | `"strict"` | All virtual models advertise low/medium/high/xhigh/max/ultra in both modes. At dispatch, caller efforts and defaults map to the nearest supported lower target rung, or its lowest when none is lower. Empty ladders remove effort/thinking controls; unknown ladders do so only in adaptive. Summary and target selection/order are preserved. |
 | `imageInput?` | `"auto" \| "disabled"` | `"auto"` | `"auto"` publishes image only when every target supports images; `"disabled"` forces text-only (drops image from published modalities and rejects image-bearing requests before dispatch). |
 | `alias?` | `string` | — | Optional public model id in place of the canonical picker slug. |
 | `nativeAlias?` | `boolean` | `false` | Let a currently supported bare native id take precedence only for that unqualified id. Bare `gpt-5.6-*` ids use Codex Pool/Direct credentials. Account-qualified routes remain distinct. Provider-qualified routes such as `openai-apikey/gpt-5.6-*` use their configured API-key route and never fall through to the native alias. |

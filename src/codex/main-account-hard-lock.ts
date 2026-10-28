@@ -70,7 +70,13 @@ function resetTimestamp(value: number | undefined): number | undefined {
   return value < 10_000_000_000 ? value * 1000 : value;
 }
 
-type WindowReading = { kind: "short" | "long"; percent: number | undefined; resetAt: number | undefined };
+type WindowReading = {
+  kind: "short" | "long";
+  percent: number | undefined;
+  resetAt: number | undefined;
+  /** Decayed one-observation short-window burn; only the short window carries it. */
+  burn?: number;
+};
 
 /**
  * The windows that govern the lock. The 5h and weekly windows each govern on their own, so either
@@ -83,7 +89,10 @@ function governingWindows(quota: NonNullable<ReturnType<typeof getMainPolicyQuot
     || quota.shortWindowSeconds !== undefined;
   const hasWeekly = quota.weeklyPercent !== undefined || quota.weeklyResetAt !== undefined;
   const windows: WindowReading[] = [];
-  if (hasShort) windows.push({ kind: "short", percent: quota.shortPercent, resetAt: quota.shortResetAt });
+  if (hasShort) {
+    windows.push({ kind: "short", percent: quota.shortPercent, resetAt: quota.shortResetAt,
+      burn: quota.shortBurnPerRequestPercent });
+  }
   if (hasWeekly) windows.push({ kind: "long", percent: quota.weeklyPercent, resetAt: quota.weeklyResetAt });
   if (windows.length === 0) windows.push({ kind: "long", percent: quota.monthlyPercent, resetAt: quota.monthlyResetAt });
   return windows;
@@ -104,7 +113,13 @@ export function getMainAccountHardLockStatus(
   const quota = getMainPolicyQuota();
   if (!quota) return { enabled: true, state: "unknown", thresholds };
   const windows = governingWindows(quota);
-  const blocking = windows.filter(w => validPercent(w.percent) && w.percent >= thresholds[w.kind]);
+  // The static gate reacts to a reading that already crossed its window threshold. The reserve
+  // projects the next one: when the decayed per-observation burn estimate says the next response
+  // can finish the short window (percent + burn >= 100), waiting for the raw percent to cross the
+  // threshold is the same jump blindness that carried 97 straight to 100 past the old 98 gate.
+  const blocking = windows.filter(w => validPercent(w.percent)
+    && (w.percent >= thresholds[w.kind]
+      || (w.kind === "short" && validPercent(w.burn) && w.percent + w.burn >= 100)));
   if (blocking.length > 0) {
     // The lock holds until every blocking window reads lower or is authoritatively absent, so the earliest possible unlock is
     // the latest blocking reset. One blocking window without a future reset makes it unknowable.

@@ -8,8 +8,9 @@ import { isCanonicalOpenAiForwardProvider, OPENAI_CODEX_PROVIDER_ID } from "../.
 import { providerCodexAccountMode } from "../../providers/registry";
 import { isSelectableCodexPoolAccount } from "../account-id";
 import type { OcxConfig } from "../../types";
-import { isValidWhamHistoryObservation, parseMainPolicyUsageQuota, parseUsageQuota, setAccountQuotaFromParsed } from "../quota";
+import { getAccountQuota, isValidWhamHistoryObservation, parseMainPolicyUsageQuota, parseUsageQuota, setAccountQuotaFromParsed } from "../quota";
 import type { StoredAccountQuota, WhamUsageResponse } from "../quota";
+import { liftCodexLaneComboCooldowns } from "../../combos/quota-recovery-lift";
 import { reconcileMainCodexAccountRuntimeState } from "../account-lifecycle";
 import { getMainChatgptAccountId, readCodexTokensResult } from "../auth-collision";
 import { clearAccountNeedsReauth, markAccountNeedsReauth } from "../account-runtime-state";
@@ -439,6 +440,9 @@ export async function fetchMainAccountInfoWhileOwned(
       setMainAccountPlan(result.plan);
       if (result.quota) {
         setAccountQuotaFromParsed(MAIN_CODEX_ACCOUNT_ID, result.quota, writerGeneration, mainQuotaWriter, policyQuota, undefined, false, false, isValidWhamHistoryObservation(usage) ? quota : null);
+        // The stored snapshot (merged, not just what this probe observed) decides: a healthy
+        // account lifts the reset-derived combo cooldowns waiting on the exhausted window.
+        liftCodexLaneComboCooldowns(getAccountQuota(MAIN_CODEX_ACCOUNT_ID));
       }
       publishQuotaDispatch(dispatchSequence);
       readState.usable = quota !== null;

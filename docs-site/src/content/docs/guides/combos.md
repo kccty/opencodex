@@ -927,6 +927,13 @@ an existing `jev-auto` id or alias is reported instead of creating a duplicate. 
 **Decision service** (TypeSafe JEV or a configured `jev-decision` provider) and **Decision timeout
 (ms)**, and the Combos overview lists each JEV Combo's decision service, endpoint, and timeout.
 
+For automatic approval review, the Combo target picker also offers OpenAI's internal
+`codex-auto-review` when the native OpenAI provider is enabled. You can combine it with a
+configured provider's approval model, then choose the saved `combo/<id>` under
+**Models → Settings → Auto-review override**. A failover Combo tries its targets in order
+on eligible upstream failures; a completed approval denial does not trigger another review.
+The native internal model remains hidden from ordinary model pickers and subagent lists.
+
 Each target also shows a live quota badge: **Available**, **Out of quota**, or **Quota unknown**. The editor blocks Save and Create for quota only when every usable target has a current server-confirmed exhausted inference limit for its configured credential. Display-only account, model, search and MCP quota, or missing or expired routing evidence, does not cause this block. The block expires at the applicable reset or freshness boundary and is rechecked when the page becomes active or visible; Refresh reloads both Combo data and quota. The dashboard
 editor does not yet expose `cooldownMs` or `waitForCooldownMs`; use the configuration file or management
 API until the follow-up UI work lands.

@@ -219,3 +219,18 @@ Dashboard Fast-row persistence and client refresh follow the [Fast selector rows
 
 Image-bearing Codex history follows the selected model's existing compaction handling after a
 [compaction routing override](../transports/responses-failover.md#compaction-routing-overrides).
+
+## Responses input-image boundaries
+
+Canonical ChatGPT Responses turns carry two image boundaries. Before dialing, canonical input
+containing an `input_image` or `computer_screenshot` part is excluded from the transparent
+upstream WebSocket optimization and stays on HTTP/SSE; explicitly opted-in noncanonical gateways
+keep their own WS policy. At parsing, once the latest completed compact-wire item exists, earlier
+`input_image` blocks in schema-compatible message and tool-output arrays are copy-on-write replaced
+with a fixed text marker, so later turns and the process-local continuation cache stop carrying
+historical image bytes. Newer images survive, a `compaction_trigger` alone is not success, and the
+client's own transcript is never rewritten.
+
+> Decision record: [ADR-0123](../decisions/ADR-0123-responses-http-sse.md)
+
+> Decision record: [ADR-0124](../decisions/ADR-0124-responses-http-sse.md)

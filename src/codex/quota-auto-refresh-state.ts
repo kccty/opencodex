@@ -12,6 +12,8 @@ export const completedByAccount = new Map<string, CodexQuotaAutoRefreshWindows>(
 export const retryAfterByAccount = new Map<string, CodexQuotaRetry>();
 export const scheduledByAccount = new Map<string, CodexQuotaAutoRefreshWindows>();
 export const quotaRefreshAfterByAccount = new Map<string, CodexQuotaRetry>();
+/** Earliest next percentage re-read per account (epoch ms); the sweep's freshness cadence. */
+export const percentProbeNextByAccount = new Map<string, number>();
 
 /** Drop every activation record when its account is removed. */
 export function forgetCodexQuotaAutoRefreshAccount(accountId: string): void {
@@ -19,6 +21,7 @@ export function forgetCodexQuotaAutoRefreshAccount(accountId: string): void {
   retryAfterByAccount.delete(accountId);
   scheduledByAccount.delete(accountId);
   quotaRefreshAfterByAccount.delete(accountId);
+  percentProbeNextByAccount.delete(accountId);
 }
 
 /** Clear the dependency-free activation bookkeeping for isolated tests. */
@@ -27,4 +30,5 @@ export function resetCodexQuotaAutoRefreshStateForTests(): void {
   retryAfterByAccount.clear();
   scheduledByAccount.clear();
   quotaRefreshAfterByAccount.clear();
+  percentProbeNextByAccount.clear();
 }

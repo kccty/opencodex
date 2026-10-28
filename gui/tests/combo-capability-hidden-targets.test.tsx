@@ -9,7 +9,7 @@ import { readSessionListCacheEntry, writeSessionListCacheEntry } from "../src/se
 import { parseComboList } from "../src/combo-workspace-data";
 
 const API_BASE = "http://localhost";
-const CACHE_KEY = `ocx.combos.workspace.v2:${API_BASE}`;
+const CACHE_KEY = `ocx.combos.workspace.v3:${API_BASE}`;
 const globals = ["document", "window", "navigator", "localStorage", "sessionStorage", "IS_REACT_ACT_ENVIRONMENT"] as const;
 let previousGlobals: Record<(typeof globals)[number], unknown>;
 let testWindow: Window;
@@ -20,6 +20,7 @@ const originalFetch = globalThis.fetch;
 type CatalogRow = {
   provider: string;
   id: string;
+  native?: boolean;
   disabled?: boolean;
   inputModalities?: string[];
   reasoningEfforts?: string[];
@@ -229,7 +230,7 @@ test("hidden models including the provider default appear once in new and existi
 });
 
 test("all-hidden catalogs remain selectable and old filtered caches are ignored", async () => {
-  writeSessionListCacheEntry(`ocx.combos.workspace.v1:${API_BASE}`, {
+  writeSessionListCacheEntry(`ocx.combos.workspace.v2:${API_BASE}`, {
     combos: parseComboList({ combos: [combo([target(hiddenImage)])] }),
     providers: [{ name: "vision" }], models: [], cataloguedComboIds: ["hidden-test"],
   });
@@ -269,6 +270,54 @@ test("editing can select and save a hidden model without changing its visibility
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({ path: "/api/combos", body: { combo: { targets: [target(hiddenImage)] } } });
   expect(hiddenImage.disabled).toBe(true);
+});
+
+test("Combo opts into internal approval models and saves native and reseller reviewers separately", async () => {
+  const nativeReviewer: CatalogRow = { provider: "openai", id: "codex-auto-review", native: true };
+  const resellerReviewer: CatalogRow = { provider: "V-API", id: "codex-auto-review" };
+  mockCatalog([nativeReviewer, resellerReviewer], [target(resellerReviewer)]);
+  const fetchCatalog = globalThis.fetch;
+  const modelRequests: URL[] = [];
+  const writes: { path: string; body: unknown }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (init?.method === "PUT") {
+      writes.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
+      return Response.json({ success: true });
+    }
+    if (url.pathname === "/api/models") {
+      modelRequests.push(url);
+      return Response.json(url.searchParams.get("includeInternalApproval") === "true"
+        ? [nativeReviewer, resellerReviewer]
+        : [resellerReviewer]);
+    }
+    return fetchCatalog(input, init);
+  }) as typeof fetch;
+  await mount();
+  expect(modelRequests).toHaveLength(1);
+  expect(modelRequests[0]!.searchParams.get("includeInternalApproval")).toBe("true");
+  await openDetail();
+  await chooseProvider("openai");
+  const nativeModel = container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
+  expect([...nativeModel.options].map(option => option.value)).toEqual(["", "codex-auto-review"]);
+  expect(nativeModel.value).toBe("codex-auto-review");
+  const addTarget = [...container.querySelectorAll<HTMLButtonElement>("button")]
+    .find(button => button.textContent?.trim() === "Add target")!;
+  await act(async () => { addTarget.click(); });
+  const newTarget = container.querySelectorAll<HTMLElement>(".cwi-target-entry")[1]!;
+  await chooseProvider("V-API", newTarget);
+  const resellerModel = newTarget.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
+  expect([...resellerModel.options].map(option => option.value)).toEqual(["", "codex-auto-review"]);
+  expect(resellerModel.value).toBe("codex-auto-review");
+  const save = container.querySelector<HTMLButtonElement>("#cwi-edit-save")!;
+  expect(save.disabled).toBe(false);
+  await act(async () => { save.click(); });
+  expect(writes).toEqual([{
+    path: "/api/combos",
+    body: expect.objectContaining({ combo: expect.objectContaining({
+      targets: [target(nativeReviewer), target(resellerReviewer)],
+    }) }),
+  }]);
 });
 
 test("JEV decision model suggestions include hidden models but exclude the JEV combo itself", async () => {

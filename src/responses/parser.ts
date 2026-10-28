@@ -16,9 +16,9 @@ import { createToolChoiceResolver, namespacedToolName } from "../types";
 import { responsesRequestSchema } from "./schema";
 import { providerMetadataFromResponsesFunctionCall } from "./provider-opaque-metadata";
 import { lookupReplayThoughtSignature } from "./thought-signature-replay";
+import { CHECKPOINT_CONTINUATION_NOTE, compactionItemToText, decodeCompactionSummary, isCompactionItemType, omitHistoricalImagesBeforeLastCompaction, SUMMARY_PREFIX } from "./compaction";
 import { decodeRetainedCompaction, RETAINED_COMPACTION_PREFIX } from "./retained-compaction";
-import { CHECKPOINT_CONTINUATION_NOTE, compactionItemToText, decodeCompactionSummary, isCompactionItemType, SUMMARY_PREFIX } from "./compaction";
-import { previousResponseReplayPrefixLength } from "./state";
+import { copyPreviousResponseReplayProvenance, previousResponseReplayPrefixLength } from "./state";
 import { decodeReasoningEnvelope } from "./reasoning-envelope";
 import { hasRoutedIdentity, nameRoutedIdentity } from "../adapters/identity";
 import { extractHostedWebSearch, WEB_SEARCH_TOOL_NAME } from "../web-search/synthetic-tool";
@@ -221,6 +221,9 @@ export function parseRequest(
   body: unknown,
   parseOptions?: { replayCacheScope?: OcxReasoningReplayScopeRef },
 ): OcxParsedRequest {
+  const sanitized = omitHistoricalImagesBeforeLastCompaction(body);
+  if (sanitized.body !== body) copyPreviousResponseReplayProvenance(body, sanitized.body);
+  body = sanitized.body;
   const replayCacheScope = parseOptions?.replayCacheScope;
   const replayedInputPrefixLength = previousResponseReplayPrefixLength(body);
   const parsed = responsesRequestSchema.safeParse(body);

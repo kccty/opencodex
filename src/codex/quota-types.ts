@@ -104,6 +104,8 @@ export type StoredAccountQuota = {
   /** Local short-usage observation time; partial/credit updates do not refresh it. */
   shortObservedAt?: number;
   shortWindowSeconds?: number;
+  /** Decayed EMA of one-observation short-window increases; the hard lock reserves this burn. */
+  shortBurnPerRequestPercent?: number;
   customWindows?: Array<{ label: string; percent: number; resetAt?: number }>;
   resetCredits?: number;
   /** Spendable usage credits; resetCredits are separate, manually redeemed reset tickets. */

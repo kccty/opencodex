@@ -134,7 +134,7 @@ test("a keyless self-hosted decision row creates JEV Auto with itself as the dec
           ])),
         });
       }
-      if (url.endsWith("/api/models")) return Response.json(models);
+      if (url.endsWith("/api/models?includeInternalApproval=true")) return Response.json(models);
       if (url.endsWith("/api/provider-quotas")) return Response.json({ reports: [] });
       throw new Error(`unexpected request: ${url}`);
     },
@@ -337,7 +337,7 @@ test("a deep link naming an unusable decision row falls back to TypeSafe", async
           ])),
         });
       }
-      if (url.endsWith("/api/models")) return Response.json(models);
+      if (url.endsWith("/api/models?includeInternalApproval=true")) return Response.json(models);
       if (url.endsWith("/api/provider-quotas")) return Response.json({ reports: [] });
       throw new Error(`unexpected request: ${url}`);
     },

@@ -55,6 +55,7 @@ import { initialModelSelectionPending, pendingModelSelectionProviders } from "..
 import { catalogFastRowEligible, fastRowId } from "../fast-row";
 import { knownEffortRowIds } from "../effort-row";
 import { visionSidecarConsumerClassifier } from "../../vision/eligibility";
+import { internalApprovalModelRows } from "./approval-model-rows";
 
 /**
  * One row of the `/api/models` list. Routed rows spread a `CatalogModel`, so the shape is
@@ -68,6 +69,8 @@ export type ManagementModelRow = Partial<CatalogModel> & {
   disabled: boolean;
   initialSelectionPending?: boolean;
   native?: boolean;
+  /** Only returned to callers opting into the internal Combo approval inventory. */
+  internalApproval?: boolean;
   custom?: boolean;
   customId?: string;
   manualPricing?: boolean;
@@ -307,6 +310,8 @@ export async function listManagementModelRows(
   options: {
     entitlementWaitMs?: number;
     models?: readonly CatalogModel[];
+    /** Combo-only inventory; ordinary model lists and client exports never opt in. */
+    includeInternalApproval?: boolean;
     /** Filled with each provider's content revision as of the moment its rows were chosen. */
     providerContentRevisions?: Map<string, string>;
   } = {},
@@ -505,7 +510,8 @@ export async function listManagementModelRows(
   // Account-qualified rows remain distinct, explicitly selected routes.
   const visibleNative = native.filter(model => model.id.includes("/")
     || !customNamespaced.has(routedSlug(model.provider, model.id)));
-  const rows = [...visibleNative, ...dedupedRouted, ...customRowsWithExportMetadata];
+  const rows = [...visibleNative, ...internalApprovalModelRows(config, options.includeInternalApproval),
+    ...dedupedRouted, ...customRowsWithExportMetadata];
   // Include disabled rows and configured aliases before the export visibility filter:
   // a hidden real `x--fast` must never become a synthetic selector for another model.
   const knownIds = config.fastRows === false ? new Set<string>() : knownEffortRowIds(config);

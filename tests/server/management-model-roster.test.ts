@@ -14,6 +14,10 @@ import {
 import type { CatalogModel } from "../../src/codex/catalog";
 import type { OcxConfig } from "../../src/types";
 import { clearModelCache, reconcileModelCacheProviders, setCached } from "../../src/codex/model-cache";
+import { internalApprovalModelRows } from "../../src/server/management/approval-model-rows";
+import { ManagementRequest } from "../helpers/management-auth";
+import { handleManagementAPI } from "../../src/server/management-api";
+import { catalogConvergenceFactory } from "../helpers/catalog-convergence";
 
 /**
  * A read-only caller has to be able to see what a writer would write without performing the
@@ -71,6 +75,52 @@ describe("a supplied roster replaces the gather and keeps the projection", () =>
     // Visibility and provider selection decide which rows survive here, so this asserts the call
     // completes through the same path rather than pinning that policy from outside.
     await expect(loadExportModels(CONFIG, SUPPLIED)).resolves.toBeInstanceOf(Array);
+  });
+});
+
+describe("the internal approval inventory is opt-in and management-only", () => {
+  const nativeConfig: OcxConfig = {
+    ...CONFIG,
+    defaultProvider: "openai",
+    fastRows: false,
+    providers: { openai: { adapter: "openai-responses", baseUrl: "https://chatgpt.com/backend-api/codex", authMode: "forward", liveModels: false } },
+  };
+
+  test("default inventory and exports omit the native reviewer while Combo inventory includes it", async () => {
+    const ordinary = await listManagementModelRows(nativeConfig, { models: [] });
+    expect(ordinary.some(row => row.id === "codex-auto-review")).toBe(false);
+    const internal = await listManagementModelRows(nativeConfig, { models: [], includeInternalApproval: true });
+    const reviewers = internal.filter(row => row.id === "codex-auto-review");
+    expect(reviewers).toHaveLength(1);
+    expect(reviewers[0]).toMatchObject({
+      provider: "openai", namespaced: "codex-auto-review", native: true, internalApproval: true,
+      disabled: false, contextWindow: 272_000, inputModalities: ["text", "image"],
+      defaultReasoningEffort: "medium", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    });
+    expect((await loadExportModels(nativeConfig, [])).some(row => row.id === "codex-auto-review")).toBe(false);
+    expect((await listManagementModelRows(nativeConfig, { models: [] })).some(row => row.id === "codex-auto-review")).toBe(false);
+  });
+
+  test("only an enabled canonical OpenAI provider contributes internal approval rows", () => {
+    expect(internalApprovalModelRows(CONFIG, true)).toEqual([]);
+    expect(internalApprovalModelRows(nativeConfig, false)).toEqual([]);
+    const provider = nativeConfig.providers.openai!;
+    for (const overrides of [{ disabled: true }, { authMode: "key" as const }, { baseUrl: "https://provider.example/v1" }]) {
+      expect(internalApprovalModelRows({ ...nativeConfig, providers: { openai: { ...provider, ...overrides } } }, true)).toEqual([]);
+    }
+  });
+
+  test("GET /api/models requires the exact opt-in without changing the default response", async () => {
+    for (const [query, expected] of [["", false], ["?includeInternalApproval=false", false], ["?includeInternalApproval=true", true]] as const) {
+      const url = new URL(`http://127.0.0.1:10100/api/models${query}`);
+      const response = await handleManagementAPI(new ManagementRequest(url, { headers: { Host: url.host } }), url, nativeConfig, {
+        createManagementConvergeCodex: catalogConvergenceFactory(),
+        saveConfigPreservingClaudeCode: () => {},
+      });
+      expect(response?.status).toBe(200);
+      const rows = await response!.json() as Array<{ id: string }>;
+      expect(rows.some(row => row.id === "codex-auto-review")).toBe(expected);
+    }
   });
 });
 

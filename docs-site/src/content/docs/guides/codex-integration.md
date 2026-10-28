@@ -131,9 +131,12 @@ queueing a request before the first output even when the local proxy and network
 Only some turns take the ChatGPT websocket transport — the same `responses_websockets` lane Codex
 CLI defaults to. A turn is eligible when the Bun runtime supports the bounded relay, the request
 is a `POST` to the canonical Responses URL or a configured WebSocket route, and its JSON body sets
-`stream` to `true` at the root. Everything else stays on SSE over HTTP, and an eligible turn still
-falls back to it when the request cannot be prepared, the `response.create` frame exceeds its size
-limit, or the proxy route cannot carry the socket.
+`stream` to `true` at the root. Canonical ChatGPT requests whose `input` contains an `input_image`
+or `computer_screenshot` stay on HTTP/SSE before any socket is opened; this avoids replaying vision
+input through the single-frame WebSocket beta path. Everything else stays on SSE over HTTP, and an
+eligible turn still falls back to it when the request cannot be prepared, the `response.create`
+frame exceeds its size limit, or the proxy route cannot carry the socket. An explicitly
+WebSocket-enabled custom provider keeps its configured transport policy for image input.
 
 To keep the built-in ChatGPT provider on HTTP/SSE, set `providers.openai.upstreamWebsocket`
 to `false` in `~/.opencodex/config.json` and restart the proxy. Merge this field into the
@@ -514,6 +517,15 @@ That preserves native thread identity, but it also makes Codex request native re
 When a routed provider cannot return a native compaction blob, OpenCodeX stores the summary in its
 own `ocx1:`/`ocx2:` envelope. Native ChatGPT cannot verify that envelope if OpenCodeX is later removed from
 the request path.
+
+Regardless of which side performs compaction, a later Responses request containing a completed
+`compaction`, `compaction_summary`, or `context_compaction` item makes OpenCodeX replace older
+`input_image` blocks with `[historical image omitted after context compaction]` before provider
+dispatch. Images attached after the newest completed marker remain available. A
+`compaction_trigger` alone does not remove anything. The sanitized body is also what OpenCodeX keeps
+for `previous_response_id` replay, so historical Base64 bytes do not return through its continuation
+cache. Codex can still retain the original bytes in its own local task data; this behavior prevents
+them from leaving the proxy again rather than rewriting Codex's files.
 
 On an authenticated loopback route, enable client-side compaction to keep V2 sub-agent routing while preventing new `ocx1:`/`ocx2:` compaction summaries. Non-loopback and API-key routes retain their existing provider and authentication behavior:
 
@@ -1208,7 +1220,7 @@ wrapper, global proxy change or login rewrite is installed by these controls.
 ## Routed models during Codex reserve mode
 
 Codex Pool can optionally protect stored pool accounts at a selected 5-hour or weekly usage
-threshold. The Desktop/main account keeps its separate 98% hard lock.
+threshold. The Desktop/main account keeps its separate 95% hard lock.
 Set `codexPool.lowQuotaProtection` in configuration to pause accounts, record a log-and-API
 alert, or both; see [routing configuration](/reference/configuration/routing/#codex-pool-low-quota-protection).
 A pause takes effect for the next selection immediately, while saving it to disk is deferred.

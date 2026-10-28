@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAIN_CODEX_ACCOUNT_ID as MAIN } from "../../src/codex/account-id";
-import { getMainAccountHardLockStatus } from "../../src/codex/main-account-hard-lock";
+import { getMainAccountHardLockStatus, resolveMainAccountHardLockThresholds } from "../../src/codex/main-account-hard-lock";
 import { fetchMainAccountInfo } from "../../src/codex/auth-api";
 import * as authCollision from "../../src/codex/auth-collision";
 import { setMainAccountPlan } from "../../src/codex/main-account";
@@ -240,12 +240,12 @@ describe("declared short-window producer evidence", () => {
     await fetchMainAccountInfo(true);
     const cfg = { codexMainAccountHardLock: true };
     expect(getMainPolicyQuota()?.weeklyPercent).toBe(Number(value));
-    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < 98 ? "ready" : "blocked");
+    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < resolveMainAccountHardLockThresholds(cfg).long ? "ready" : "blocked");
     clearAccountQuota();
     applyAccountQuotaFromUpstreamHeaders(MAIN, new Headers({ "x-codex-primary-used-percent": String(value) }),
       undefined, writerFor());
     expect(getMainPolicyQuota()?.weeklyPercent).toBe(Number(value));
-    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < 98 ? "ready" : "blocked");
+    expect(getMainAccountHardLockStatus(cfg).state).toBe(Number(value) < resolveMainAccountHardLockThresholds(cfg).long ? "ready" : "blocked");
     expect(calls).toBe(1);
   });
 
