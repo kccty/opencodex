@@ -110,7 +110,9 @@ describe("trusted private IPv4 dashboard sessions", () => {
       for (let reload = 0; reload < 2; reload++) {
         const page = await fetch(target + "/", { headers });
         expect(page.status).toBe(200);
-        expect(await page.text()).toContain('name="opencodex-session-token"');
+        const html = await page.text();
+        expect(html).toContain('name="opencodex-session-token"');
+        expect(html).toContain('name="opencodex-management-auth-required" content="0"');
       }
       for (const path of ["/api/combos", "/v1/models", "/healthz"]) {
         const response = await fetch(target + path, { headers });
@@ -118,10 +120,16 @@ describe("trusted private IPv4 dashboard sessions", () => {
         await response.text();
       }
       const localPage = await fetch(target + "/");
-      expect(await localPage.text()).toContain('name="opencodex-session-token"');
+      const localHtml = await localPage.text();
+      expect(localHtml).toContain('name="opencodex-session-token"');
+      expect(localHtml).toContain('name="opencodex-management-auth-required" content="0"');
       const localApi = await fetch(target + "/api/combos");
       expect(localApi.status).toBe(200);
       await localApi.text();
+      const publicPage = await fetch(target + "/", { headers: { Host: `hub.example.test:${port}` } });
+      const publicHtml = await publicPage.text();
+      expect(publicHtml).not.toContain('name="opencodex-session-token"');
+      expect(publicHtml).toContain('name="opencodex-management-auth-required" content="1"');
     } finally {
       await server.stop(true);
     }

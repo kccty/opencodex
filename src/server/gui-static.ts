@@ -129,14 +129,13 @@ function runtimeRoleMeta(runtimeRole: string): string {
 }
 
 /**
- * Does this bind require a typed management credential?
+ * Does this page request require a typed management credential?
  *
  * Emitted for the same reason as the role: so the dashboard can answer a question on first
  * paint without asking a remote-hub endpoint. It is NOT the same question as the role.
- * `standalone` + `hostname: "0.0.0.0"` is an operator who deliberately exposed the dashboard
- * and must type the admin token, while a `hub` on loopback still mints its own session — so
- * the role cannot stand in for this, and using it that way locked out exactly the operator
- * who is supposed to see the prompt.
+ * Private-LAN requests need no typed credential even on a wildcard bind. Public and DNS-host
+ * requests on that same listener still need authentication. The runtime role and bind alone
+ * cannot describe the page's policy.
  *
  * Non-secret: it restates the bind the operator chose, which `/healthz` and the dashboard
  * already reflect.

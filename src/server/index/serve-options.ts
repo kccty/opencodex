@@ -97,6 +97,7 @@ import {
   isAllowedRequestOrigin,
   isAllowedManagementOrigin,
   isApiAuthRequired,
+  isTrustedLanRequest,
   isLoopbackHostname,
   markTrustedHubManagementRequest,
   markPrivateNetworkRequest,
@@ -1951,7 +1952,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         undefined,
         guiSessionCandidate ?? undefined,
         config.runtimeRole ?? "standalone",
-        isApiAuthRequired(policy),
+        isApiAuthRequired(policy) && !isTrustedLanRequest(req, policy),
       );
       if (guiFile) return guiFile;
       if (url.pathname === "/" && req.method === "GET") {

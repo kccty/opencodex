@@ -170,7 +170,7 @@ transport so environment HTTP proxies cannot observe or fabricate the exchange.
 
 On the primary private-LAN listener, `isTrustedLanRequest` in `src/server/auth-cors.ts` admits
 literal private IPv4 and loopback Host/origins on private or wildcard binds without credentials when the kernel peer is private or loopback. The public fetch handler records that fact once; forwarded headers cannot provide it.
-Browser sessions bootstrap automatically; other callers receive the `trusted-lan` principal.
+Browser sessions bootstrap automatically; other callers receive the `trusted-lan` principal. The served page declares `opencodex-management-auth-required=0` for those requests, preventing the frontend from offering an admin-token prompt on LAN session recovery.
 Dedicated management ingress and public/DNS destinations retain credential authentication. If no management credential is available, or
 management token creation, validation, or permission hardening fails, `/api/*` requests without a
 valid scoped capability or LAN admission return 503 while `/v1/*` and unauthenticated `/healthz` continue to operate.
