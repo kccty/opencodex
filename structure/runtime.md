@@ -80,6 +80,7 @@ verified matching processes regardless of the advisory freshness result. Read-on
 ## Hub management dashboard address
 
 When hub management ingress is enabled, `src/cli/dispatch.ts` opens the dashboard on the literal IPv4 loopback address and configured ingress port, matching the listener in `src/server/index.ts`. Other dashboard address selection is unchanged.
+The local management page issues ordinary loopback GUI sessions on that dedicated listener even when the public data listener binds a LAN address, provided `hub.managementPublicOrigin` is absent or matches the local loopback origin; frontend-backed and public-listener requests retain their authentication requirements.
 
 ## Codex desktop process membership
 

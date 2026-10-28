@@ -1894,6 +1894,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (req.method === "GET") {
           const session = issueGuiSession(req, config, managementAuth, {
             trustedTailscaleIngress: ingress === "hub-management",
+            peerAddress: requestServer.requestIP(req)?.address ?? null,
           });
           return session
             ? withManagementCors(serveSessionBootstrap(session), req, config)
@@ -1953,6 +1954,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
       const guiSessionCandidate = req.method === "GET" && (url.pathname === "/" || !url.pathname.includes("."))
         ? issueGuiSession(req, config, managementAuth, {
           trustedTailscaleIngress: ingress === "hub-management",
+          peerAddress: requestServer.requestIP(req)?.address ?? null,
         })
         : null;
       const guiFile = serveGuiFile(

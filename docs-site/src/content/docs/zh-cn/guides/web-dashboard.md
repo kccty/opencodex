@@ -22,6 +22,10 @@ bun run dev:gui
 
 ## 登录
 
+明确可信的局域网可设置 `trustedLanDashboard: true`，并把 `hostname` 绑定到具体的内网 IPv4 地址。该地址及端口会为局域网设备自动登录，刷新后也无需输入 token；这会授予局域网访问者 Web 管理权限。默认关闭，不影响推理和直接 API 的认证。
+
+如果主监听绑定了局域网地址，可启用 `runtimeRole: "hub"` 和 `hub.managementIngress: {"enabled":true,"port":10101}`，通过 `http://127.0.0.1:10101` 自动登录本机仪表盘。此时 `hub.managementPublicOrigin` 应留空或与该回环地址完全一致；配置为远程 HTTPS 入口时仍需身份认证或配对。回环推理端口 10100 不提供 Web 页面。监听配置改动后执行 `ocx service restart`，再用 `ocx gui` 打开管理地址。
+
 通过 `localhost`、`127.0.0.1` 等 loopback 地址打开仪表盘时，它会自动获得一个短期 GUI session，因此通常无需输入 token。在非 loopback 主机上公开仪表盘时，必须使用 `OPENCODEX_ADMIN_AUTH_TOKEN` 或自动生成的 `~/.opencodex/admin-api-token` 文件中的管理员 token。
 
 远程仪表盘会显示标准密码表单，浏览器密码管理器可以提示保存并自动填充 token。仪表盘本身只在内存中保存 token，不会写入 `localStorage` 或 `sessionStorage`；是否持久保存完全由浏览器或密码管理器决定。

@@ -24,11 +24,23 @@ bun run dev:gui
 
 ## Sign-in
 
+For an explicitly trusted LAN, set `trustedLanDashboard: true` together with a literal RFC1918
+IPv4 `hostname`. The dashboard automatically signs in private-network peers on that exact
+address and port, including after refresh. This grants dashboard management access to LAN
+devices. It defaults off and does not disable inference or direct API authentication.
+
 On the default loopback bind (`localhost` / `127.0.0.1`) the dashboard never asks for a token:
 the proxy mints short-lived GUI sessions into the served page and renews them silently when
 they expire or the proxy restarts. Only a dashboard bound to a non-loopback hostname requires
 the admin token (`OPENCODEX_ADMIN_AUTH_TOKEN`, or the auto-generated
 `~/.opencodex/admin-api-token` file).
+
+A hub with `hub.managementIngress: {"enabled":true,"port":10101}` also provides automatic local
+sign-in at `http://127.0.0.1:10101`, even when its main listener binds a LAN address, when
+`hub.managementPublicOrigin` is unset or exactly that loopback origin. A management ingress
+configured for a remote HTTPS frontend keeps its existing identity/pairing requirements. The optional
+loopback inference companion on port 10100 does not serve the dashboard. Use `ocx service restart`
+after changing listener settings, then `ocx gui` to open the management address.
 
 When a remote dashboard needs that credential, it presents a standard password form so a browser
 password manager can offer to save and autofill it. The dashboard itself still keeps the token only

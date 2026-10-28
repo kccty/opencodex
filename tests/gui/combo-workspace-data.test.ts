@@ -336,7 +336,7 @@ describe("combo-workspace-data", () => {
     expect(filterCombos(items, "gpt-balanced").map((item) => item.id)).toEqual(["balanced"]);
   });
 
-  test("intersectComboEfforts keeps only common advertised efforts (#488)", () => {
+  test("virtual effort picker exposes all levels for mixed target ladders", () => {
     const map = new Map<string, readonly string[] | undefined>([
       ["a/m1", ["low", "medium", "high", "ultra"]],
       ["b/m2", ["medium", "high", "xhigh"]],
@@ -344,7 +344,7 @@ describe("combo-workspace-data", () => {
     expect(intersectComboEfforts(
       [{ provider: "a", model: "m1" }, { provider: "b", model: "m2" }],
       map,
-    )).toEqual(["medium", "high"]);
+    )).toEqual(COMBO_EFFORTS);
   });
 
   test("intersectComboEfforts treats unknown members as picker wildcards", () => {
@@ -354,14 +354,14 @@ describe("combo-workspace-data", () => {
     expect(intersectComboEfforts(
       [{ provider: "a", model: "m1" }, { provider: "b", model: "unknown" }],
       map,
-    )).toEqual(["low", "medium"]);
+    )).toEqual(COMBO_EFFORTS);
     expect(intersectComboEfforts(
       [{ provider: "b", model: "unknown" }],
       map,
     )).toEqual(COMBO_EFFORTS);
   });
 
-  test("intersectComboEfforts keeps an advertised empty ladder restrictive", () => {
+  test("virtual effort picker stays complete with a no-effort target", () => {
     const map = new Map<string, readonly string[] | undefined>([
       ["a/m1", ["low", "medium"]],
       ["b/no-reasoning", []],
@@ -369,21 +369,19 @@ describe("combo-workspace-data", () => {
     expect(intersectComboEfforts(
       [{ provider: "a", model: "m1" }, { provider: "b", model: "no-reasoning" }],
       map,
-    )).toEqual([]);
+    )).toEqual(COMBO_EFFORTS);
   });
 
-  test("intersectComboEfforts drops empty ladders in adaptive mode", () => {
+  test("virtual effort picker stays complete in both capability modes", () => {
     const map = new Map<string, readonly string[] | undefined>([
       ["a/m1", ["low", "medium"]],
       ["b/no-reasoning", []],
     ]);
     const targets = [{ provider: "a", model: "m1" }, { provider: "b", model: "no-reasoning" }];
-    // The editor must agree with the served catalog: under adaptive the no-effort target
-    // stops emptying the picker, otherwise the dashboard shows a control the proxy does not.
-    expect(intersectComboEfforts(targets, map, "adaptive")).toEqual(["low", "medium"]);
-    // Explicit strict, and the default argument, both keep today's restrictive behavior.
-    expect(intersectComboEfforts(targets, map, "strict")).toEqual([]);
-    expect(intersectComboEfforts(targets, map)).toEqual([]);
+    // The editor and served catalog expose the same complete virtual ladder.
+    expect(intersectComboEfforts(targets, map, "adaptive")).toEqual(COMBO_EFFORTS);
+    expect(intersectComboEfforts(targets, map, "strict")).toEqual(COMBO_EFFORTS);
+    expect(intersectComboEfforts(targets, map)).toEqual(COMBO_EFFORTS);
   });
 
   test("reasoningEffortMode survives parse and serialize", () => {

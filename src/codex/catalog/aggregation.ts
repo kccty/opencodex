@@ -134,22 +134,8 @@ export function deriveComboCatalogModel(
     ? derivedInputModalities.filter(modality => modality !== "image")
     : derivedInputModalities;
   if (inputModalities.length === 0) return null;
-  // Unknown ladders (`undefined`) are wildcards for catalog derivation — same
-  // boundary as the GUI picker. Under the default `strict` mode an explicit empty
-  // ladder still constrains, so one target that advertises no effort control empties
-  // the whole combo's picker. `adaptive` is the opt-in for mixed-capability groups:
-  // empty ladders drop out of the published intersection while non-empty ladders
-  // still define it. Dispatch is unaffected either way — each concrete target
-  // resolves its own effort at request time.
-  const knownLadders = members
-    .map(member => member.reasoningEfforts)
-    .filter((ladder): ladder is string[] => ladder !== undefined);
-  const advertisedLadders = combo.reasoningEffortMode === "adaptive"
-    ? knownLadders.filter(ladder => ladder.length > 0)
-    : knownLadders;
-  const reasoningEfforts = advertisedLadders.length === 0
-    ? []
-    : intersectStrings(advertisedLadders);
+  // Picker intent is virtual; concrete dispatch owns capability-aware downshifting.
+  const reasoningEfforts = CODEX_REASONING_LEVELS.map(level => level.effort);
   const contextWindow = Math.min(...members.map(member => member.contextWindow!));
   const limitingMembers = members.filter(member => member.contextWindow === contextWindow);
   const hasLimitingContextCapMetadata = limitingMembers.some(

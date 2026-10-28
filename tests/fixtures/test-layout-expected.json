@@ -589,6 +589,7 @@
   "html-lang-boot-script.test.ts": "gui", "hub-disable-live-save.test.ts": "config",
   "hub-disable.test.ts": "cli", "hub-gated-local-clients.test.ts": "cli",
   "hub-invite.test.ts": "cli", "hub-usage.test.ts": "server",
+  "hub-loopback-gui-session.test.ts": "server",
   "hyperbolic-provider.test.ts": "providers", "identity-neutralize.test.ts": "adapters",
   "identity-subagent.test.ts": "adapters", "import-cycle-ratchet.test.ts": "ci-workflows",
   "incomplete-reason-normalization.test.ts": "responses", "inference-attempt.test.ts": "server",

@@ -187,7 +187,7 @@ Failover 是刻意受限的。它有助於目標特定的可用性、認證、�
 
 ## 混合 reasoning 能力
 
-`reasoningEffortMode` 預設為 `"strict"`，發布所有目標 effort 清單的交集，包括明確空清單。`"adaptive"` 計算交集時排除空清單，讓混合 combo 保留選擇器。未知清單在兩種模式下都不限制目錄交集。
+所有虛擬模型均提供 `low`、`medium`、`high`、`xhigh`、`max`、`ultra` 六個檔位，不按底層模型取交集。傳送時根據選中的模型向下匹配最接近的支援檔位；沒有更低檔時使用最低支援檔。`reasoningEffortMode` 預設為 `"strict"`；`"adaptive"` 額外移除未知能力目標的 effort 控制。
 
 傳送時，明確空清單在兩種模式下都會移除 effort 與 thinking 控制；未知清單只在 adaptive 移除這些控制。`reasoning.summary` 與其他非 effort 欄位保持不變，已知非空目標仍按現有規則解析 effort。strict 的未知目標及一般 native Chat 的未知宣告保留呼叫者控制。預設值補入不會覆寫現有 effort，但能力正規化可移除不支援的控制。
 
@@ -273,7 +273,7 @@ Combo 儲存於頂層 `combos` 物件中，以 combo id 為 key：
 | `strategy` | 否 | `"failover"` | 可用值為 `"failover"`、`"round-robin"`、`"random"`、`"least-used"`、`"reset-window"`、`"jev"`。JEV 只決定第一個符合條件的目標與 effort；後續嘗試由一般 Combo fallback 處理。 |
 | `stickyLimit` | 否 | `1` | 僅適用於 `round-robin`：每次選擇的成功請求數，1 到 100 的整數。 |
 | `defaultEffort` | 否 | `null` | `low`、`medium`、`high`、`xhigh`、`max` 或 `ultra`；僅在呼叫者省略 effort 且目標宣告支援時套用。 |
-| `reasoningEffortMode` | 否 | `"strict"` | `strict` 或 `adaptive`；選擇混合能力交集及目標層級控制正規化。 |
+| `reasoningEffortMode` | 否 | `"strict"` | 兩種模式都提供完整六檔；傳送時按具體目標降檔，adaptive 額外移除未知目標的控制。 |
 | `alias` | 否 | 無 | 可選的修剪後公開模型 id；使用上述別名規則。空值儲存為無別名。 |
 | `description` | 否 | 無 | 僅供 catalog 顯示的列描述，最多 128 個字元且不含控制字元。未設定時保留產生的 `Routed via opencodex → combo (combo).` 文字。 |
 

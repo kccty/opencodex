@@ -518,6 +518,8 @@ export interface OcxConfig {
   port: number;
   /** Runtime topology role. Absence preserves the historical standalone behavior. */
   runtimeRole?: OcxRuntimeRole;
+  /** Explicitly trust RFC1918 peers for browser session bootstrap on the exact LAN bind. */
+  trustedLanDashboard?: boolean;
   /** Hub-only public management metadata. Presence is inert outside the hub role. */
   hub?: OcxHubConfig;
   /** Opt-in remote dashboard issuance policy. Presence is inert outside the hub role. */
@@ -1368,15 +1370,9 @@ export type OcxComboDefaultEffort = "low" | "medium" | "high" | "xhigh" | "max" 
 export type OcxComboDefaultEffortMode = "fallback" | "force";
 
 /**
- * How a combo derives the reasoning ladder it publishes to the picker.
- *
- * `strict` (default) intersects every advertised ladder, so a target that explicitly
- * advertises no effort control (`reasoningEfforts: []`) empties the combo's picker.
- * `adaptive` excludes those empty ladders from the published intersection, keeping the
- * control usable for a mixed-capability group. Unknown (`undefined`) ladders stay
- * wildcards in both modes. An explicit empty ladder removes unsupported effort controls
- * in either mode; adaptive dispatch also removes them before sending to an unknown target,
- * while each known target still resolves its own effort.
+ * Both modes publish the full virtual reasoning ladder and downshift known targets.
+ * Empty ladders remove unsupported effort controls in either mode. Adaptive also
+ * removes them for unknown capabilities; strict preserves unknown caller controls.
  */
 export type OcxComboReasoningEffortMode = "strict" | "adaptive";
 

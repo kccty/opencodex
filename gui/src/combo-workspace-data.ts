@@ -72,36 +72,14 @@ export const JEV_DECISION_ISSUE_LABEL_KEYS: Record<JevDecisionIssue, TKey> = {
 
 
 /**
- * Intersection of advertised effort ladders for picker availability.
- * Unknown ladders are wildcards here only; runtime injection remains fail-closed.
+ * Virtual models expose the complete picker; dispatch resolves each target's effort.
  */
 export function intersectComboEfforts(
-  targets: readonly ComboTarget[],
-  modelEfforts: ReadonlyMap<string, readonly string[] | undefined>,
-  reasoningEffortMode: "strict" | "adaptive" = "strict",
+  _targets: readonly ComboTarget[],
+  _modelEfforts: ReadonlyMap<string, readonly string[] | undefined>,
+  _reasoningEffortMode: "strict" | "adaptive" = "strict",
 ): ComboEffort[] {
-  const complete = targets.filter((t) => t.provider.trim() && t.model.trim());
-  if (complete.length === 0) return [...COMBO_EFFORTS];
-  const effortSet = new Set<string>(COMBO_EFFORTS);
-  let common: string[] | null = null;
-  for (const target of complete) {
-    const key = `${target.provider.trim()}/${target.model.trim()}`;
-    const listed = modelEfforts.get(key);
-    if (listed === undefined) continue;
-    // Adaptive mirrors the served catalog: a target advertising no effort control is
-    // excluded from the intersection rather than collapsing it for every sibling.
-    if (reasoningEffortMode === "adaptive" && listed.length === 0) continue;
-    const member = listed.filter((effort) => effortSet.has(effort));
-    if (common === null) {
-      common = member;
-    } else {
-      const memberSet = new Set(member);
-      common = common.filter((effort) => memberSet.has(effort));
-    }
-  }
-  if (common === null) return [...COMBO_EFFORTS];
-  const commonSet = new Set(common);
-  return COMBO_EFFORTS.filter((effort) => commonSet.has(effort));
+  return [...COMBO_EFFORTS];
 }
 
 export interface ComboTarget {

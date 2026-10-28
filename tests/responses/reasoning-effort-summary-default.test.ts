@@ -31,7 +31,7 @@ describe("reasoning effort preserves visible thinking when summary is omitted", 
     }
     for (const effort of ["none", "minimal", "medium"]) {
       expect(concreteComboRequestBody({ reasoning: { effort } }, target, "high", ["high"]).reasoning)
-        .toEqual({ effort });
+        .toEqual({ effort: effort === "medium" ? "high" : effort });
     }
     expect(concreteComboRequestBody({ reasoning: { effort: "medium", summary: "none" } }, target, "high", ["high"], "strict", "force").reasoning)
       .toEqual({ effort: "high", summary: "none" });

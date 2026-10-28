@@ -384,6 +384,21 @@ describe("combo request cloning", () => {
     expect(concrete.reasoning).toEqual({ effort: "xhigh", summary: "concise" });
   });
 
+  test("explicit virtual efforts downshift independently for every target without changing the parent", () => {
+    const parent = { reasoning: { effort: "ultra", summary: "none" } };
+    for (const mode of ["strict", "adaptive"] as const) {
+      expect(concreteComboRequestBody(parent, target, null, ["low", "high"], mode).reasoning)
+        .toEqual({ effort: "high", summary: "none" });
+      expect(concreteComboRequestBody(parent, target, null, ["low", "max"], mode).reasoning)
+        .toEqual({ effort: "max", summary: "none" });
+      expect(concreteComboRequestBody(parent, target, null, [], mode).reasoning)
+        .toEqual({ summary: "none" });
+      expect(concreteComboRequestBody({ reasoning: { effort: "medium" } }, target, null, ["low", "high"], mode).reasoning)
+        .toEqual({ effort: "low" });
+    }
+    expect(parent.reasoning).toEqual({ effort: "ultra", summary: "none" });
+  });
+
   test("omits combo defaults for unset, no-reasoning, and unknown target capabilities", () => {
     expect(concreteComboRequestBody({ model: "combo/x" }, target, null, ["high"]).reasoning).toBeUndefined();
     // An explicitly empty ladder is how a no-reasoning model is expressed.

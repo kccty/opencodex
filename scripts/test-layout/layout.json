@@ -1039,6 +1039,7 @@
     "hub-gated-local-clients.test.ts": "cli",
     "hub-invite.test.ts": "cli", "hub-disable.test.ts": "cli",
     "hub-usage.test.ts": "server",
+    "hub-loopback-gui-session.test.ts": "server",
     "hyperbolic-provider.test.ts": "providers",
     "identity-neutralize.test.ts": "adapters",
     "identity-subagent.test.ts": "adapters",

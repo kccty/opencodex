@@ -22,6 +22,10 @@ port directly, do not add a cloud-firewall rule for it, and do not use Tailscale
 public-internet surface and is outside this deployment model.
 
 With management ingress enabled, the local dashboard command opens `http://127.0.0.1:<management port>` so the address matches the IPv4-only listener without resolving `localhost`.
+Direct local access at that address automatically receives a loopback GUI session when
+`hub.managementPublicOrigin` is unset or exactly matches that loopback origin, including when
+the hub's main listener binds a LAN address. No Tailscale service or manually entered token is
+needed in this local-only mode; an ingress configured for a remote frontend retains its existing authentication.
 
 Client configurations exported or applied through that dashboard still target the inference
 listener, not the management port. Local clients use the configured loopback companion port

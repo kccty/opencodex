@@ -158,6 +158,7 @@ accounts, routing, keys — never requires a pairing code.
 | Situation | What happens |
 |---|---|
 | API auth not required, request is loopback, origin allowed | Session minted, source `loopback`. This is the ordinary local dashboard. |
+| Hub management ingress, literal loopback Host, origin allowed, and `hub.managementPublicOrigin` absent or matching that loopback origin | Session minted, source `loopback`, even when the public listener binds a LAN address. Frontend-backed, public and inference-companion listeners do not gain this exception. |
 | Role is `hub`, request arrived through the trusted Tailscale ingress over HTTPS, the login is in `remoteGui.allowedTailscaleUsers`, and the browser origin is allowed | Session minted, source `tailscale-identity`. No pairing code involved. |
 | Anything else | `null` — the browser gets 401 and must exchange a pairing grant at `POST /opencodex-session`. |
 

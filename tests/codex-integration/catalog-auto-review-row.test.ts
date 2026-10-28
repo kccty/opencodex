@@ -263,7 +263,7 @@ test("approval capabilities and combo members preserve native caps and exact eff
   const combo = normalizeComboConfig({ strategy: "failover", targets: [{ provider: "openai", model: reviewer }, { provider: "V-API", model: reviewer }] });
   expect(deriveComboCatalogModel("approval", combo, [member, apiMember])).toMatchObject({
     provider: "combo", id: "approval", contextWindow: 128_000,
-    reasoningEfforts: upstream.supported_reasoning_levels.map(level => level.effort),
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
   });
 });
 

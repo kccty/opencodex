@@ -188,6 +188,7 @@ export const configSchema = z.object({
   // is safe: startServer() already falls back to 127.0.0.1 for a missing hostname. Write-time
   // rejection lives in validateConfigCandidate() so bad values still surface to the caller.
   hostname: z.string().trim().min(1).optional().catch(undefined),
+  trustedLanDashboard: z.boolean().optional().catch(undefined),
   // Discriminated on `enabled` so a disabled entry cannot be forced to carry a port (#1102).
   // An enabled one MAY omit it: that is the companion form, which binds 127.0.0.1 on the proxy
   // port and is legal only off a loopback/wildcard bind — a relationship between two fields, so

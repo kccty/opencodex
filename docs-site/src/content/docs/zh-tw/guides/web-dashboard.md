@@ -22,6 +22,10 @@ bun run dev:gui
 
 ## 登入
 
+可信任的區域網路可設定 `trustedLanDashboard: true`，並將 `hostname` 綁定至具體內網 IPv4。該位址及連接埠會為區網裝置自動登入，重新整理也不需 token；這會授予區網訪客 Web 管理權限。預設關閉，推理及直接 API 認證維持不變。
+
+若主監聽綁定區域網路位址，可啟用 `runtimeRole: "hub"` 和 `hub.managementIngress: {"enabled":true,"port":10101}`，透過 `http://127.0.0.1:10101` 自動登入本機儀表板。此時 `hub.managementPublicOrigin` 應留空或與該回環位址完全一致；設定為遠端 HTTPS 入口時仍須身分驗證或配對。回環推理埠 10100 不提供 Web 頁面。變更監聽設定後執行 `ocx service restart`，再用 `ocx gui` 開啟管理位址。
+
 在預設的 loopback 綁定（`localhost` / `127.0.0.1`）上，儀表板永遠不會要求 token：代理會將短期
 GUI session 簽發到服務的頁面中，並在到期或代理重啟時靜默續期。只有綁定到非 loopback 主機名稱的
 儀表板才需要 admin token（`OPENCODEX_ADMIN_AUTH_TOKEN`，或自動產生的

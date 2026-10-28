@@ -11,6 +11,7 @@ import {
 
 export type GuiSessionIssuance =
   | "loopback"
+  | "trusted-lan"
   | "tailscale-identity"
   | "pairing";
 
@@ -54,7 +55,10 @@ export interface GuiSessionState {
 }
 
 export interface GuiSessionRequestContext {
+  /** Derived from the actual dedicated loopback management listener, never request headers. */
   trustedTailscaleIngress: boolean;
+  /** Kernel-reported connection peer; forwarded headers are never authority. */
+  peerAddress?: string | null;
   now?: number;
 }
 
@@ -168,6 +172,15 @@ function tailscaleLoginAllowed(req: Request, config: OcxConfig): boolean {
   return (config.remoteGui?.allowedTailscaleUsers ?? []).some(user => user === login);
 }
 
+/** Restrict the explicit trusted-LAN option to literal RFC1918 IPv4 addresses. */
+function isPrivateLanAddress(value: string): boolean {
+  const address = value.replace(/^::ffff:/i, "");
+  const parts = address.split(".");
+  if (parts.length !== 4 || !parts.every(part => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255)) return false;
+  const [a, b] = parts.map(Number);
+  return a === 10 || (a === 172 && b! >= 16 && b! <= 31) || (a === 192 && b === 168);
+}
+
 export function issueGuiSession(
   req: Request,
   config: OcxConfig,
@@ -179,7 +192,30 @@ export function issueGuiSession(
   if (!host) return null;
   const now = context.now ?? Date.now();
 
-  if (!isApiAuthRequired(config)) {
+  // Explicit operator trust grants browser access, not unauthenticated API access.
+  // Exact Host/origin plus the kernel peer prevent forwarded-header and DNS alias bypasses.
+  if (config.trustedLanDashboard === true && !context.trustedTailscaleIngress
+    && config.hostname && isPrivateLanAddress(config.hostname)
+    && host.hostname === config.hostname && host.port === String(config.port)
+    && context.peerAddress
+    && (isPrivateLanAddress(context.peerAddress) || isLoopbackHostname(context.peerAddress))) {
+    const origin = new URL(req.url).origin;
+    const expected = `http://${config.hostname}:${config.port}`;
+    const browserOrigin = req.headers.get("Origin");
+    if (origin === expected && managementRequestOrigin(req, config) === expected
+      && (!browserOrigin || browserOrigin === expected)) {
+      return mintSession(origin, origin, "trusted-lan", state, now);
+    }
+  }
+
+  const publicOrigin = config.hub?.managementPublicOrigin;
+  // A remote frontend can rewrite Host to loopback. Automatic local entry is safe only
+  // without that frontend, or when the configured origin matches this loopback request.
+  const localManagementIngress = config.runtimeRole === "hub"
+    && context.trustedTailscaleIngress
+    && isLoopbackHostname(host.hostname)
+    && (!publicOrigin || canonicalHttpOrigin(publicOrigin) === managementRequestOrigin(req, config));
+  if (!isApiAuthRequired(config) || localManagementIngress) {
     if (!isLoopbackHostname(host.hostname) || !isAllowedManagementOrigin(req, config)) return null;
     const origin = managementRequestOrigin(req, config);
     return origin ? mintSession(origin, origin, "loopback", state, now) : null;

@@ -176,7 +176,7 @@ combo 失败分为 **跳转** 失败和 **终止** 失败。
 
 ## 混合 reasoning 能力
 
-`reasoningEffortMode` 默认为 `"strict"`，发布所有目标 effort 列表的交集，包括显式空列表。`"adaptive"` 在计算交集时排除空列表，让混合 combo 保留选择器。未知列表在两种模式下都不限制目录交集。
+所有虚拟模型均提供 `low`、`medium`、`high`、`xhigh`、`max`、`ultra` 六个档位，不按底层模型取交集。发送时根据命中的模型向下匹配最接近的支持档位；没有更低档时使用最低支持档。`reasoningEffortMode` 默认为 `"strict"`；`"adaptive"` 额外移除未知能力目标的 effort 控制。
 
 发送时，显式空列表在两种模式下都会移除 effort 和 thinking 控制；未知列表仅在 adaptive 下移除这些控制。`reasoning.summary` 和其他非 effort 字段保持不变，已知非空目标继续按现有规则解析 effort。strict 的未知目标及普通 native Chat 的未知声明保留调用方控制。默认值填充不会覆盖现有 effort，但能力归一化可移除不支持的控制。
 
@@ -273,7 +273,7 @@ combo 会存储在顶层的 `combos` 对象中，并以 combo id 作为键：
 | `waitForCooldownMs` | 否 | `0` | 0 到 600000 的整数。在返回 `combo_unavailable` 前等待最早恢复资格的冷却中目标的最长时间；请求中止会取消等待。 |
 | `cooldownWaitPolicy` | 否 | 未设置 | `"before-last-resort"` 会在普通目标处于冷却中、且其剩余时间在 `waitForCooldownMs` 之内时，推迟使用标记为 `lastResort` 的目标。标记为 `lastResort` 的目标只有在没有普通目标可用时才会使用。仅此字符串生效。推迟等待与普通等待在每次选择中共用同一个 `waitForCooldownMs` 预算。 |
 | `defaultEffort` | 否 | `null` | `low`、`medium`、`high`、`xhigh`、`max` 或 `ultra`；仅当调用方省略 effort 且目标声明支持时才会应用。 |
-| `reasoningEffortMode` | 否 | `"strict"` | `strict` 或 `adaptive`；选择混合能力交集和目标级控制归一化。 |
+| `reasoningEffortMode` | 否 | `"strict"` | 两种模式都提供完整六档；发送时按具体目标降档，adaptive 额外移除未知目标的控制。 |
 | `imageInput` | 否 | `"auto"` | `"auto"` 或 `"disabled"`。`"auto"` 仅在每个目标都支持图片时发布图片能力；`"disabled"` 强制仅文本（从对外能力中去掉图片，并在分发前拒绝带图请求）。 |
 | `alias` | 否 | 无 | 可选的、已修剪的公开模型 id；使用上面的别名规则。空值会以“无别名”形式存储。 |
 | `nativeAlias` | 否 | `false` | 显式允许当前受支持的裸原生 alias 接管路由和 catalog 优先级；绝不会根据 alias 自动推断。 |

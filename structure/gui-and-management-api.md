@@ -572,7 +572,7 @@ Pairing-grant source limiting applies only to invalid guesses from an allowed br
 
 ## Durable provider PATCH
 
-`PUT /api/combos` shares this transaction for combo changes, rename references, disabled selectors and request-only Vision Sidecar enrollment; see `tests/routing/combo-vision-enrollment.test.ts`.
+`trustedLanDashboard: true` enables browser sessions on an exact RFC1918 IPv4 bind for private kernel peers. `src/server/gui-session.ts` checks Host, port and origin before minting `trusted-lan` sessions; forwarded headers grant no authority. It defaults off; API/inference auth and CSRF remain intact. `PUT /api/combos` shares this transaction for combo changes, rename references, disabled selectors and request-only Vision Sidecar enrollment; see `tests/routing/combo-vision-enrollment.test.ts`.
 
 `src/server/management/provider-routes.ts` commits every provider PATCH variant through
 `src/server/management/provider-patch-transaction.ts`, including standalone default-provider
