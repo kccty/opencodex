@@ -83,12 +83,11 @@ const CONFIGURATIONS: Array<{
     loopbackPorts: [],
   },
   {
-    // (e) wildcard bind: loopback DOES answer, but the public listener still demands admission
-    // regardless of which address received the request. Reachable ≠ admitted.
+    // (e) the primary wildcard listener also serves credential-free local inference.
     label: "wildcard bind",
     config: hub({ hostname: "0.0.0.0" }),
     origin: "http://127.0.0.1:10100",
-    requiresAdmissionToken: true,
+    requiresAdmissionToken: false,
     loopbackPorts: [PUBLIC_PORT],
   },
   {
@@ -116,11 +115,9 @@ describe("localInferenceDestination", () => {
   }
 
   test("a credential is demanded exactly when the destination is not a credential-free socket", () => {
-    // This is the invariant the struct exists to carry: the only two free sockets are the
-    // unauthenticated loopback listener and a genuinely loopback public bind. Asserting it as a
-    // set, rather than per-case, is what makes a new branch that forgets the flag fail here.
+    // Include the primary wildcard listener alongside loopback and explicit companions.
     const free = CONFIGURATIONS.filter(c => !c.requiresAdmissionToken).map(c => c.label);
-    expect(free).toEqual(["standalone loopback", "companion hub", "ported hub"]);
+    expect(free).toEqual(["standalone loopback", "companion hub", "ported hub", "wildcard bind"]);
   });
 
   test("no listener, a disabled listener, and no config at all keep the public port on loopback", () => {
@@ -156,7 +153,7 @@ describe("localInferenceDestination", () => {
     for (const hostname of ["0.0.0.0", "0.0.0.0.", "00.0.0.000", "::", "[::]", "::0", "0::", "*", "0"]) {
       const destination = localInferenceDestination({ hostname }, PUBLIC_PORT);
       expect({ hostname, origin: destination.origin, requires: destination.requiresAdmissionToken })
-        .toEqual({ hostname, origin: "http://127.0.0.1:10100", requires: true });
+        .toEqual({ hostname, origin: "http://127.0.0.1:10100", requires: false });
     }
   });
 
@@ -176,11 +173,17 @@ describe("localInferenceDestination", () => {
   test("literal non-loopback IPs still compose a credential-bearing bind destination", () => {
     // The fail-closed branch is only for names: a literal tailnet or LAN bind keeps its exact
     // address, because a literal cannot be re-resolved to a different peer after startup.
-    for (const hostname of [TAILNET, "192.168.7.7", "fd7a:115c:a1e0::1", "[fd7a:115c:a1e0::1]"]) {
+    for (const hostname of [TAILNET, "fd7a:115c:a1e0::1", "[fd7a:115c:a1e0::1]"]) {
       const destination = localInferenceDestination({ hostname }, PUBLIC_PORT);
       expect(destination.requiresAdmissionToken).toBe(true);
       expect(destination.origin).not.toBe("http://127.0.0.1:10100");
     }
+  });
+
+  test.each(["192.168.50.83", "10.0.0.1", "172.31.0.1"])("private IPv4 %s uses the primary port without a credential", hostname => {
+    expect(localInferenceDestination({ hostname }, PUBLIC_PORT)).toEqual({
+      origin: `http://${hostname}:10100`, port: PUBLIC_PORT, requiresAdmissionToken: false,
+    });
   });
 
   test("localhost is a name but not a DNS bind, and keeps the address it already had", () => {

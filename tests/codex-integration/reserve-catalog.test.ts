@@ -133,7 +133,7 @@ describe("Reserve effective authless configuration", () => {
       expect(isEffectiveCodexDesktopAuthless(config({ hostname, codexDesktopAuthless: undefined }))).toBe(false);
     },
   );
-  test.each(["localhost..", "0.0.0.0", "::", "[::]", "192.0.2.10", "proxy.example"])(
+  test.each(["localhost..", "192.0.2.10", "proxy.example"])(
     "non-loopback %s keeps admission and hides Reserve", hostname => {
       const state = config({ hostname });
       expect(isLoopbackHostname(hostname)).toBe(false);
@@ -143,6 +143,11 @@ describe("Reserve effective authless configuration", () => {
       expect(build(state).map(row => row.slug)).toEqual(["external/model"]);
     },
   );
+  test.each(["0.0.0.0", "::", "[::]", "192.168.50.83"])("primary LAN bind %s honors the explicit authless preference", hostname => {
+    expect(shouldInjectApiAuthHeader({ hostname })).toBe(false);
+    expect(isEffectiveCodexDesktopAuthless(config({ hostname }))).toBe(true);
+    expect(isEffectiveCodexDesktopAuthless(config({ hostname, codexDesktopAuthless: false }))).toBe(false);
+  });
   test("dedicated loopback listener is effective, but a remote client is never effective", () => {
     const state = config({ hostname: "0.0.0.0", unauthenticatedLoopbackListener: { enabled: true, port: 10101 } });
     expect(isEffectiveCodexDesktopAuthless(state)).toBe(true);

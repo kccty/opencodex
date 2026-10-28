@@ -20,16 +20,13 @@
  *
  *   loopback listener enabled   → `127.0.0.1:<effective listener port>`, no credential
  *   loopback/absent `hostname`  → `127.0.0.1:<public port>`, no credential
- *   wildcard `hostname`         → `127.0.0.1:<public port>`, ADMISSION CREDENTIAL REQUIRED
- *   literal non-loopback IP     → `<probeHostname(hostname)>:<public port>`, credential REQUIRED
+ *   wildcard `hostname`         → `127.0.0.1:<public port>`, no credential
+ *   literal private IPv4        → `<hostname>:<public port>`, no credential
+ *   other literal IP           → `<probeHostname(hostname)>:<public port>`, credential REQUIRED
  *   DNS bind name               → `127.0.0.1:<public port>`, credential REQUIRED (fail closed)
  *
- * A wildcard bind does answer on 127.0.0.1, which is why its origin stays loopback, but the
- * public listener demands data-plane admission regardless of which address received the
- * request — so it lands in the same credential bucket as a tailnet bind. That is why the
- * resolver returns a STRUCT rather than a string: a caller that cannot see
- * `requiresAdmissionToken` cannot tell a free socket from one that will 401, and the only
- * honest answers are "attach the data-plane credential" or "say so in a log line".
+ * The primary wildcard and private IPv4 listeners also serve the host's own clients.
+ * They do not need an auxiliary port or an admission token in exported client files.
  *
  * The credential in question is the DATA-PLANE one — `OPENCODEX_API_AUTH_TOKEN`, the hardened
  * service token file, or a configured `apiKeys` entry, the same ladder
@@ -54,7 +51,7 @@ export interface LocalInferenceDestination {
   /**
    * Does the listener at `origin` demand `x-opencodex-api-key`?
    *
-   * False only for the unauthenticated loopback listener and a genuinely loopback public bind.
+   * False for loopback listeners and primary loopback, wildcard or private IPv4 binds.
    * A caller that cannot attach a credential must log that it is degrading rather than write a
    * destination that answers 401.
    */

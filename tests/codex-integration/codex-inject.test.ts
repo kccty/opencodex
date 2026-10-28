@@ -38,7 +38,7 @@ describe("Codex config injection", () => {
     for (const config of [
       { codexClientCompaction: true },
       { codexDesktopAuthless: true },
-      { hostname: "192.168.1.20" },
+      { hostname: "203.0.113.20" },
     ]) {
       const target = standaloneCodexRoutingTarget(10100, config);
       const before = structuredClone(target);
@@ -100,7 +100,7 @@ describe("Codex config injection", () => {
       const authlessBlock = buildProviderTableBlockForTarget(authless, false, "My Gateway");
       expect(authlessBlock).toContain("requires_openai_auth = false");
       expect(authlessBlock).not.toContain("env_key");
-      const remote = standaloneCodexRoutingTarget(10100, { hostname: "192.168.1.20" });
+      const remote = standaloneCodexRoutingTarget(10100, { hostname: "203.0.113.20" });
       const remoteBlock = buildProviderTableBlockForTarget(remote, false, "My Gateway");
       expect(remoteBlock).toContain("requires_openai_auth = true");
       expect(remoteBlock).toContain('env_key = "OPENCODEX_API_AUTH_TOKEN"');
@@ -125,12 +125,12 @@ describe("Codex config injection", () => {
   });
 
   test("standalone routing-target wrappers remain byte-compatible", () => {
-    const target = standaloneCodexRoutingTarget(10100, { hostname: "192.168.1.20" });
+    const target = standaloneCodexRoutingTarget(10100, { hostname: "203.0.113.20" });
     expect(buildProviderTableBlock(target, true)).toBe(
-      buildProviderTableBlock(10100, true, true, "192.168.1.20"),
+      buildProviderTableBlock(10100, true, true, "203.0.113.20"),
     );
     expect(buildProfileFile(target, "/tmp/opencodex-catalog.json", true)).toBe(
-      buildProfileFile(10100, "/tmp/opencodex-catalog.json", true, true, "192.168.1.20"),
+      buildProfileFile(10100, "/tmp/opencodex-catalog.json", true, true, "203.0.113.20"),
     );
   });
 
@@ -156,8 +156,8 @@ describe("Codex config injection", () => {
       expect(profile).not.toContain("openai_base_url");
     });
 
-    test("non-loopback binds ignore the opt-in: admission env_key and requires_openai_auth = true stay", () => {
-      const target = standaloneCodexRoutingTarget(10100, { hostname: "192.168.1.20", codexDesktopAuthless: true });
+    test("public binds ignore the opt-in: admission env_key and requires_openai_auth = true stay", () => {
+      const target = standaloneCodexRoutingTarget(10100, { hostname: "203.0.113.20", codexDesktopAuthless: true });
       expect(target.desktopAuthless).toBeUndefined();
       expect(target.requiresAdmissionToken).toBe(true);
       const block = buildProviderTableBlock(target);
@@ -214,7 +214,7 @@ describe("Codex config injection", () => {
 
     test("non-loopback admission remains token-protected", () => {
       const target = standaloneCodexRoutingTarget(10100, {
-        hostname: "192.168.1.20",
+        hostname: "203.0.113.20",
         codexClientCompaction: true,
       });
       expect(target.requiresAdmissionToken).toBe(true);

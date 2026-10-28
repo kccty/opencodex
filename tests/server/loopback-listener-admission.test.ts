@@ -393,8 +393,8 @@ describe("hub management ingress configuration", () => {
 });
 
 describe("injected Codex provider block", () => {
-  test("a wildcard bind alone still emits the env auth header", () => {
-    expect(shouldInjectApiAuthHeader({ hostname: "0.0.0.0" })).toBe(true);
+  test("a wildcard primary listener needs no env auth header", () => {
+    expect(shouldInjectApiAuthHeader({ hostname: "0.0.0.0" })).toBe(false);
   });
 
   test("enabling the loopback listener drops the header", () => {
@@ -410,7 +410,7 @@ describe("injected Codex provider block", () => {
     expect(shouldInjectApiAuthHeader({
       hostname: "0.0.0.0",
       unauthenticatedLoopbackListener: { enabled: false },
-    })).toBe(true);
+    })).toBe(false);
   });
 
   test("the emitted block points at the loopback port and carries no auth header", () => {

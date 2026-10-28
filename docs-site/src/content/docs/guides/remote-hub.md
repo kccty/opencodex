@@ -29,6 +29,11 @@ and management; clients use `http://<LAN IPv4>:10100/v1`. Local access uses
 `http://127.0.0.1:10100`. No separate management port, pairing or dashboard login is needed
 for direct LAN access. Existing enrolled clients can continue using their saved keys.
 
+The hub can also serve its own Codex on this same port. Run `ocx sync` on the hub, then
+reopen Codex. With `hostname: "0.0.0.0"`, its local configuration targets
+`http://127.0.0.1:10100/v1` without an admission-token environment variable. No companion
+listener is required. An explicit `clientIntegrations.codex: false` still disables this sync.
+
 HTTP exposes credentials and request content to observers on the network path. Use it only
 on a trusted LAN. HTTPS or SSH remains the encrypted option. The dedicated management
 ingress remains loopback-only; direct LAN HTTP uses the public listener.

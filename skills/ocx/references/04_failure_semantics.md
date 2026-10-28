@@ -123,10 +123,11 @@ If the proxy answers `ocx ready`, the hub is up regardless of what the probe cou
 can exit 0 having deliberately written nothing:
 
 > This machine is a hub; it does not rewrite its own Codex/Grok/Claude configs unless
-> unauthenticatedLoopbackListener is enabled.
+> the primary bind is loopback, private IPv4 or wildcard, or unauthenticatedLoopbackListener is enabled.
 
 That is the hub gate, not the operator's `clientIntegrations` toggle, and not a lock
-conflict — there is nothing to retry. Either enable the listener and restart the proxy
+conflict — there is nothing to retry. Loopback, wildcard and private IPv4 primary binds do not
+need a companion listener. For other hub binds, either enable the listener and restart the proxy
 (`ocx service restart` on a service install), or
 report that this hub leaves its own clients native. Details:
 [05_remote_hub.md](05_remote_hub.md#the-hub-gate-on-the-hubs-own-clients).

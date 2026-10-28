@@ -198,8 +198,8 @@ describe("the startup gate", () => {
     // First clisu-oracle dogfood boot: runtimeRole=hub ran the full local client
     // sync, marked /readyz failed on provider-discovery noise, and rewrote
     // ~/.grok/config.toml on a machine that is a SERVER for other machines.
-    expect(shouldSyncCodexOnStart({ ...baseConfig(), runtimeRole: "hub" })).toBe(false);
-    expect(shouldSyncGrokOnStart({ ...baseConfig(), runtimeRole: "hub" })).toBe(false);
+    expect(shouldSyncCodexOnStart({ ...baseConfig(), hostname: "100.76.170.81", runtimeRole: "hub" })).toBe(false);
+    expect(shouldSyncGrokOnStart({ ...baseConfig(), hostname: "100.76.170.81", runtimeRole: "hub" })).toBe(false);
     // client/standalone roles keep today's behavior.
     expect(shouldSyncCodexOnStart({ ...baseConfig(), runtimeRole: "standalone" })).toBe(true);
     expect(shouldSyncGrokOnStart({ ...baseConfig(), runtimeRole: "standalone" })).toBe(true);

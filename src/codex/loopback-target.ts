@@ -1,5 +1,6 @@
 import type { OcxConfig } from "../types";
 import type { DataPlaneAdmission } from "../server/auth-cors";
+import { isPrivateLanHostname } from "../lib/hub-transport";
 import { NATIVE_RESERVE_MODEL } from "./catalog/native-models";
 
 export const CODEX_RESERVE_HELPER_UNSUPPORTED_MESSAGE =
@@ -117,7 +118,9 @@ export function shouldInjectApiAuthHeader(
 ): boolean {
   // The dedicated listener binds loopback and does not require an admission credential.
   if (config?.unauthenticatedLoopbackListener?.enabled) return false;
-  return !isLoopbackHostname(config?.hostname);
+  return !isLoopbackHostname(config?.hostname)
+    && !isWildcardHostname(config?.hostname)
+    && !isPrivateLanHostname(config?.hostname ?? "");
 }
 
 /** Match standalone injection, never a remote client's independently supplied routing target. */

@@ -1,8 +1,8 @@
 /**
  * Hub-gate honesty (#4236, follow-up 2).
  *
- * `localClientSyncAllowed` refuses to rewrite a hub's OWN Codex/Grok/Claude configs unless the
- * unauthenticated loopback listener is on. The gate is fine; the reporting was not. Every
+ * `localClientSyncAllowed` refuses to rewrite a hub's OWN Codex/Grok/Claude configs without a
+ * credential-free local destination. Previously every
  * caller printed the *toggle's* message, so on a hub with `clientIntegrations` absent:
  *
  *  - `ocx sync` said "Codex integration is OFF" about a switch the operator never set,
@@ -60,6 +60,14 @@ function hubConfig(overrides: Partial<OcxConfig> = {}): OcxConfig {
 }
 
 describe("the hub gate has its own reason and its own sentence", () => {
+  test.each([undefined, "127.0.0.1", "localhost", "::1", "0.0.0.0", "::", "[::]", "192.168.50.83", "10.0.0.1", "172.16.0.1"])("primary bind %s syncs without another listener", hostname => {
+    const config = hubConfig({ hostname, unauthenticatedLoopbackListener: { enabled: false } });
+    expect(localClientSyncAllowed(config)).toBe(true);
+    expect(shouldSyncCodexOnStart(config)).toBe(true);
+    expect(shouldSyncGrokOnStart(config)).toBe(true);
+    expect(shouldSyncCodexOnStart({ ...config, clientIntegrations: { codex: false } })).toBe(false);
+  });
+
   test("a hub without the listener is gated; a listener or a non-hub role opens it", () => {
     expect(localClientSyncAllowed(hubConfig())).toBe(false);
     expect(localClientSkipReason(hubConfig())).toBe("hub-gated");
@@ -288,6 +296,7 @@ describe("a sibling instance never writes the live owner's client routing", () =
     expect(shouldSyncCodexOnStart(plain())).toBe(true);
     markSiblingStart(10_100);
     expect(localClientSyncAllowed(plain())).toBe(false);
+    expect(localClientSyncAllowed(hubConfig({ hostname: "0.0.0.0" }))).toBe(false);
     // The companion listener opens the HUB gate; it must not open this one.
     expect(localClientSyncAllowed(plain({ unauthenticatedLoopbackListener: { enabled: true } }))).toBe(false);
     expect(shouldSyncCodexOnStart(plain())).toBe(false);

@@ -185,13 +185,13 @@ describe("codex routing healer", () => {
 
   const closed: Array<[string, Partial<CodexRoutingHealGates> | undefined, OcxConfig | undefined]> = [
     ["sibling", { siblingOfLivePort: () => 10100 }, undefined],
-    ["hub-gated", undefined, { ...BASE_CONFIG, runtimeRole: "hub" } as OcxConfig],
+    ["hub-gated", undefined, { ...BASE_CONFIG, hostname: "100.76.170.81", runtimeRole: "hub" } as OcxConfig],
     ["Codex OFF", undefined, { ...BASE_CONFIG, clientIntegrations: { codex: false } } as OcxConfig],
     ["client connected", { clientConnected: () => true }, undefined],
     ["client journal owner", { clientJournalOwner: () => true }, undefined],
     ["recycling or draining", { exiting: () => true }, undefined],
     ["runtime record not ours", { runtimePortOfThisProcess: () => 10200 }, undefined],
-    ["admission-token routing", undefined, { ...BASE_CONFIG, hostname: "0.0.0.0" } as OcxConfig],
+    ["admission-token routing", undefined, { ...BASE_CONFIG, hostname: "203.0.113.20" } as OcxConfig],
   ];
   for (const [name, gates, config] of closed) {
     test(`a closed gate never writes: ${name}`, async () => {

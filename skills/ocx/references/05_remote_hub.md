@@ -92,18 +92,20 @@ process serving. `ocx restart` is the separate verb for a proxy you started your
 
 ### The hub gate on the hub's own clients
 
-A hub does **not** rewrite its own Codex/Grok/Claude configuration unless that listener is
-enabled. `ocx sync`, `ocx sync-cache`, `ocx ensure` and `ocx restore back` skip the write
-and say exactly this:
+A hub rewrites its own enabled Codex/Grok/Claude integrations when its primary bind is
+loopback, wildcard or private IPv4, or when the companion listener is enabled. A single-port
+LAN hub needs no companion: run `ocx sync` and reopen Codex. Other hub binds skip the write
+in `ocx sync`, `ocx sync-cache`, `ocx ensure` and `ocx restore back` and say:
 
 > This machine is a hub; it does not rewrite its own Codex/Grok/Claude configs unless
-> unauthenticatedLoopbackListener is enabled.
+> the primary bind is loopback, private IPv4 or wildcard, or unauthenticatedLoopbackListener is enabled.
 
 Read that as the gate, not as the operator's `clientIntegrations` toggle — it is claimed
 only when the toggle is ON and the gate is what stopped the write. A gated `ocx ensure`
 leaves an existing managed Grok block in place instead of stripping it, and a gated
 `ocx restore back` reports the gate instead of blaming a competing writer. The fix is to
-enable the listener and restart (`ocx service restart` on a service install), or to accept
+use a primary loopback/private IPv4/wildcard bind, enable the companion listener and restart
+(`ocx service restart` on a service install), or accept
 that this hub leaves its own clients native.
 
 ### The hub's data token is not yours to produce

@@ -952,14 +952,14 @@ describe("injectCodexConfig integration (Design B)", () => {
       "# Auto-injected by opencodex",
       "[model_providers.opencodex]",
       'name = "OpenCodex Proxy"',
-      'base_url = "http://192.168.1.50:10100/v1"',
+      'base_url = "http://203.0.113.50:10100/v1"',
       'wire_api = "responses"',
       "requires_openai_auth = true",
       'env_http_headers = { "x-opencodex-api-key" = "OPENCODEX_API_AUTH_TOKEN" }',
       "",
     ].join("\n"), "utf8");
 
-    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "192.168.1.50" }));
+    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "203.0.113.50" }));
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout).success).toBe(true);
 
@@ -1064,7 +1064,7 @@ describe("injectCodexConfig integration (Design B)", () => {
 
     test("provider-table forms (non-loopback admission, authless Desktop) do not write it", () => {
       writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.5"\n', "utf8");
-      expect(runInject(codexHome, ocxHome, JSON.stringify({ hostname: "192.168.1.20" })).status).toBe(0);
+      expect(runInject(codexHome, ocxHome, JSON.stringify({ hostname: "203.0.113.20" })).status).toBe(0);
       expect(readFileSync(join(codexHome, "config.toml"), "utf8")).not.toContain("experimental_realtime_ws_base_url");
       expect(runRestore(codexHome, ocxHome).status).toBe(0);
 
@@ -1633,10 +1633,10 @@ describe("injectCodexConfig integration (Design B)", () => {
     const original = 'model_provider = "custom"\n';
     writeFileSync(join(codexHome, "config.toml"), original, "utf8");
 
-    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "192.168.1.20" }));
+    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "203.0.113.20" }));
     expect(r.status).toBe(0);
     const message = JSON.parse(r.stdout).message;
-    expect(message).toContain("http://192.168.1.20:10100/v1");
+    expect(message).toContain("http://203.0.113.20:10100/v1");
     expect(message).toContain("x-opencodex-api-key from OPENCODEX_API_AUTH_TOKEN");
     expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
   });
@@ -1918,7 +1918,7 @@ describe("injectCodexConfig integration (Design B)", () => {
   test("authless Desktop opt-in never weakens non-loopback admission", () => {
     writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.5"\n', "utf8");
 
-    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "192.168.1.20", codexDesktopAuthless: true }));
+    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "203.0.113.20", codexDesktopAuthless: true }));
     expect(r.status).toBe(0);
     const config = readFileSync(join(codexHome, "config.toml"), "utf8");
     expect(config).toContain("requires_openai_auth = true");
@@ -1929,17 +1929,17 @@ describe("injectCodexConfig integration (Design B)", () => {
   test("non-loopback hostname injects the provider table and retains the root openai_base_url", () => {
     writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.5"\n', "utf8");
 
-    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "192.168.1.20" }));
+    const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "203.0.113.20" }));
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout).success).toBe(true);
 
     const config = readFileSync(join(codexHome, "config.toml"), "utf8");
     expect(config).toContain('model_provider = "opencodex"');
     expect(config).toContain("[model_providers.opencodex]");
-    expect(config).toContain('base_url = "http://192.168.1.20:10100/v1"');
+    expect(config).toContain('base_url = "http://203.0.113.20:10100/v1"');
     // Threads already tagged `openai` resolve through Codex's built-in provider; the retained
     // root override is what keeps them on this proxy instead of api.openai.com.
-    expect(config).toContain('openai_base_url = "http://192.168.1.20:10100/v1"');
+    expect(config).toContain('openai_base_url = "http://203.0.113.20:10100/v1"');
   });
 
   test("CRLF config (Windows-edited) stays uniformly CRLF after injection", () => {

@@ -24,6 +24,7 @@ import { deleteConfigTopLevelKey, loadConfig, mutatePersistedConfig } from "../c
 import type { OcxClientIntegrationsConfig, OcxConfig } from "../types";
 import { runStartupReadinessSync, type ReadinessGate, type SyncOutcomeLike } from "../server/readiness";
 import { siblingOfLivePort, siblingSkipMessage } from "./sibling-start";
+import { shouldInjectApiAuthHeader } from "./loopback-target";
 
 /** Clients whose durable intent this module owns. */
 export type DurableIntentClientId = keyof OcxClientIntegrationsConfig;
@@ -74,27 +75,24 @@ export function codexIntegrationEnabled(config: Pick<OcxConfig, "clientIntegrati
 /** Whether a Codex sync is permitted for this admitted config snapshot. */
 type LocalClientSyncConfig = Pick<
   OcxConfig,
-  "clientIntegrations" | "runtimeRole" | "unauthenticatedLoopbackListener"
+  "clientIntegrations" | "runtimeRole" | "hostname" | "unauthenticatedLoopbackListener"
 >;
 
 export function localClientSyncAllowed(config: LocalClientSyncConfig): boolean {
   // A sibling instance never writes the live owner's client routing (`sibling-start.ts`).
   if (siblingOfLivePort() !== null) return false;
-  return config.runtimeRole !== "hub"
-    || config.unauthenticatedLoopbackListener?.enabled === true;
+  return config.runtimeRole !== "hub" || !shouldInjectApiAuthHeader(config);
 }
 
 /**
  * The one sentence every hub-gated skip says (#4236).
  *
- * The gate is a reasonable decision; reporting it as "Codex integration is OFF" was not. An
- * operator whose `clientIntegrations` says nothing — or says `true` — was told their own switch
- * was off, and `ocx restore back` went further and blamed a competing writer that did not
- * exist. Name the gate and name the key that opens it.
+ * A hub with no credential-free local destination leaves its own clients native. This is
+ * different from the operator explicitly turning a client integration off.
  */
 export const HUB_GATED_SKIP_MESSAGE =
   "This machine is a hub; it does not rewrite its own Codex/Grok/Claude configs unless "
-  + "unauthenticatedLoopbackListener is enabled.";
+  + "the primary bind is loopback, private IPv4 or wildcard, or unauthenticatedLoopbackListener is enabled.";
 
 /**
  * Why a local-client write was skipped. The gate outranks the toggle: it is the surprising one.
@@ -137,14 +135,8 @@ export function localClientSkipMessage(
 }
 
 export function shouldSyncCodexOnStart(config: LocalClientSyncConfig): boolean {
-  // A hub is a server for OTHER machines: it must not rewrite its own host's
-  // Codex/Claude/Grok client configs on startup (interview decision Q6, and the
-  // first clisu-oracle dogfood boot proved the failure mode — the hub marked
-  // /readyz failed because it tried to run the full local client sync).
-  // A hub can be a local client only through its explicitly enabled loopback
-  // listener. The public hub bind remains outside this gate and still requires
-  // admission; an explicit client OFF continues to win. A sibling instance is closed by the
-  // same gate: the live owner keeps the routing it maintains.
+  // A hub can also serve its own clients through a credential-free primary listener.
+  // Explicit client OFF and sibling ownership still take precedence.
   return localClientSyncAllowed(config) && codexIntegrationEnabled(config);
 }
 
