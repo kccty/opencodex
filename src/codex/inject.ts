@@ -70,10 +70,10 @@ import type { OcxConfig } from "../types";
 import {
   configuredManagedSubagentDefaults,
   remoteThreadListCompatibilityWarning,
-  standaloneCodexRoutingTarget,
   validateCodexRoutingTarget,
   type CodexRoutingTarget,
 } from "./inject/routing-target";
+import { defaultCodexRoutingTarget } from "../client/codex-target";
 import {
   externalCodexModelProvider,
 } from "./inject/config-toml";
@@ -228,7 +228,7 @@ async function injectCodexConfigImpl(
   try {
     routingTarget = options.routingTarget
       ? validateCodexRoutingTarget(options.routingTarget)
-      : standaloneCodexRoutingTarget(port, config);
+      : defaultCodexRoutingTarget(port, config);
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : "Invalid Codex routing target" };
   }

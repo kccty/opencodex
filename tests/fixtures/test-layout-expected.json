@@ -527,6 +527,7 @@
   "client-connect.test.ts": "clients", "client-export-modality-enum.test.ts": "clients",
   "client-fingerprint.test.ts": "clients", "client-hub-relay.test.ts": "clients",
   "client-hub-state.test.ts": "clients", "client-hub-usage.test.ts": "clients",
+  "client-codex-target.test.ts": "clients",
   "client-injection-guard.test.ts": "codex-integration", "client-lifecycle-lock.test.ts": "clients",
   "client-machine-listener.test.ts": "clients", "client-runtime.test.ts": "clients",
   "link-home-settings.test.ts": "clients", "cli-link-child.test.ts": "cli",

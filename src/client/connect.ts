@@ -23,7 +23,6 @@ import {
   injectCodexConfig,
   currentExternalCodexModelProvider,
   isCodexRoutingInjected,
-  standaloneCodexRoutingTarget,
   type CodexRoutingTarget,
 } from "../codex/inject";
 import {
@@ -74,6 +73,7 @@ import {
   assertNoClientDisconnectPending, assertClientConnectionUnchanged, sameClientConnectionOwner,
 } from "./state";
 import { assertClientCatalogCompatible, type CatalogCompatibilityDeps } from "./catalog-compatibility";
+import { routingTarget } from "./codex-target";
 import {
   assertClientSyncExpectation, ClientSyncExpectationError, isClientSyncLockBusy, type ClientSyncExpectation,
 } from "./sync-expectation";
@@ -196,33 +196,8 @@ function catalogMatchesFingerprint(body: string, fingerprint: string | undefined
   return createHash("sha256").update(body).digest("base64url") === fingerprint;
 }
 
-/**
- * Codex routing for a connected client. A hub client points Codex at the hub with the admission
- * token in `env_key`. A link Child (`localPort` given) keeps exactly the standalone loopback form,
- * root `openai_base_url = "http://127.0.0.1:<port>/v1"` with no provider table and no `env_key`:
- * its own listener relays to the Home and attaches the link key itself, so a GUI-launched Codex
- * that never saw the key's environment variable still works, and joining changes no Codex bytes.
- */
-export function routingTarget(
-  serverUrl: string,
-  localPort?: number,
-  config?: Pick<OcxConfig, "codexDesktopAuthless" | "codexClientCompaction">,
-): CodexRoutingTarget & { link?: true } {
-  if (localPort === undefined) {
-    return { baseUrl: `${serverUrl}/v1`, requiresAdmissionToken: true, tokenEnv: "OPENCODEX_API_AUTH_TOKEN" };
-  }
-  if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
-    throw new Error("link mode requires a valid local config port");
-  }
-  return {
-    ...standaloneCodexRoutingTarget(localPort, {
-      hostname: "127.0.0.1",
-      codexDesktopAuthless: config?.codexDesktopAuthless,
-      codexClientCompaction: config?.codexClientCompaction,
-    }),
-    link: true as const,
-  };
-}
+// The routing-target shape is shared with the injector's default resolution; see its doc comment.
+export { routingTarget };
 
 function localGuiOrigin(): string {
   const port = loadConfig().port;
