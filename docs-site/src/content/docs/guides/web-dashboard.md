@@ -30,7 +30,7 @@ Private IPv4 access needs no login or trust switch. Bind `hostname` to `0.0.0.0`
 `http://<LAN IPv4>:<port>` for the dashboard, management API and model calls. The same listener
 also serves `127.0.0.1:<port>`. Disable `unauthenticatedLoopbackListener` and
 `hub.managementIngress` for this single-listener setup. LAN management requests require no
-token, and the dashboard automatically enters after every refresh. Any device able to reach
+token, and the dashboard automatically enters after every refresh, without cookies or a saved login. This policy follows the private IPv4 destination, not the connection's source IP. Any device able to reach
 that LAN address can manage the proxy, including viewing stored data keys.
 
 On the default loopback bind (`localhost` / `127.0.0.1`) the dashboard never asks for a token:

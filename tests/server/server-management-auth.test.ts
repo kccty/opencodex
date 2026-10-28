@@ -15,7 +15,7 @@ import { startServer } from "../../src/server";
 import { readCodexAccountRecord, saveCodexAccountCredential } from "../../src/codex/account-store";
 import type { OcxConfig } from "../../src/types";
 import { serveGuiFile, serveSessionBootstrap } from "../../src/server/gui-static";
-import { isProxyAdmissionSecret, markPrivateNetworkRequest } from "../../src/server/auth-cors";
+import { isProxyAdmissionSecret, markPrimaryListenerRequest } from "../../src/server/auth-cors";
 import {
   createManagementSessionControl,
   initializeManagementAuthState,
@@ -1677,7 +1677,7 @@ describe("management and data-plane credential separation", () => {
     const request = new Request("http://localhost:10100/", {
       headers: { Host: "localhost:10100" },
     });
-    markPrivateNetworkRequest(request, "127.0.0.1");
+    markPrimaryListenerRequest(request);
     expect(issueGuiSession(request, config, state)?.issuance).toBe("trusted-lan");
   });
 

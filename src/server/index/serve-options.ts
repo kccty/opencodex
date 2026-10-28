@@ -100,7 +100,7 @@ import {
   isTrustedLanRequest,
   isLoopbackHostname,
   markTrustedHubManagementRequest,
-  markPrivateNetworkRequest,
+  markPrimaryListenerRequest,
   jsonResponse,
   admissionFields,
   resolveApiAuth,
@@ -321,7 +321,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
       maxRequestBodySize: inboundBodyLimitBytes,
       async fetch(req: Request, requestServer: Server<WsData>): Promise<Response> {
       const ingress = ingressForServer(requestServer);
-      if (ingress === "public") markPrivateNetworkRequest(req, requestServer.requestIP(req)?.address ?? null);
+      if (ingress === "public") markPrimaryListenerRequest(req);
       // Bind management-origin trust to the actual Bun listener object resolved above.
       // Neither Host nor any X-Forwarded-* header can manufacture this process-local mark.
       if (ingress === "hub-management" && config.runtimeRole === "hub") {

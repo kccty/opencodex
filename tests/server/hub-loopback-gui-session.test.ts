@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createManagementSessionControl, initializeManagementAuthState, issueGuiSession, managementPrincipal, requireManagementAuth } from "../../src/server/management-auth";
-import { markPrivateNetworkRequest, markTrustedHubManagementRequest } from "../../src/server/auth-cors";
+import { markPrimaryListenerRequest, markTrustedHubManagementRequest } from "../../src/server/auth-cors";
 import { saveConfig } from "../../src/config";
 import { startServer } from "../../src/server";
 import { drainAndRemoveFixtureRoots } from "../helpers/fixture-teardown";
@@ -48,7 +48,7 @@ describe("trusted private IPv4 dashboard sessions", () => {
     const origin = "http://192.168.50.83:10100";
     const request = (headers: Record<string, string> = {}) => {
       const req = new Request(`${origin}/`, { headers: { Host: "192.168.50.83:10100", ...headers } });
-      markPrivateNetworkRequest(req, "192.168.50.169");
+      markPrimaryListenerRequest(req);
       return req;
     };
     const context = { trustedTailscaleIngress: false, peerAddress: "192.168.50.169" };
@@ -67,7 +67,7 @@ describe("trusted private IPv4 dashboard sessions", () => {
       const req = new Request("http://192.168.50.83:10100/api/combos", {
         method, headers: { Host: "192.168.50.83:10100" },
       });
-      markPrivateNetworkRequest(req, "::ffff:192.168.50.169");
+      markPrimaryListenerRequest(req);
       expect(requireManagementAuth(req, state, config)).toBeNull();
       expect(managementPrincipal(req, state, config)).toBe("trusted-lan");
       expect(control.isCurrent(req, config)).toBe(true);
@@ -87,12 +87,18 @@ describe("trusted private IPv4 dashboard sessions", () => {
       headers: { Host: "192.168.50.83:10100", Origin: "https://other.example.test" },
     });
     expect(requireManagementAuth(crossOrigin, state, config)?.status).toBe(401);
-    for (const peerAddress of [null, "8.8.8.8"]) {
+    for (const peerAddress of [null, "8.8.8.8", "fe80::1"]) {
       const forged = new Request("http://192.168.50.83:10100/api/combos", {
         headers: { Host: "192.168.50.83:10100", "X-Forwarded-For": "192.168.50.169" },
       });
-      markPrivateNetworkRequest(forged, peerAddress);
       expect(requireManagementAuth(forged, state, config)?.status).toBe(401);
+      markPrimaryListenerRequest(forged);
+      expect(requireManagementAuth(forged, state, config)).toBeNull();
+      const page = new Request("http://192.168.50.83:10100/", {
+        headers: { Host: "192.168.50.83:10100" },
+      });
+      markPrimaryListenerRequest(page);
+      expect(issueGuiSession(page, config, state, { trustedTailscaleIngress: false, peerAddress })?.issuance).toBe("trusted-lan");
     }
     const ingress = new Request("http://127.0.0.1:10101/api/combos", { headers: { Host: "127.0.0.1:10101" } });
     markTrustedHubManagementRequest(ingress);

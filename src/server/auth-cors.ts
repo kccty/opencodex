@@ -54,10 +54,9 @@ let _corsOrigin = "http://localhost:10100";
 // Listener identity is process-local. Never infer this trust from forwarded headers: the
 // request handler marks a Request only after resolving the actual Bun Server instance.
 const trustedHubManagementRequests = new WeakSet<Request>();
-const privateNetworkRequests = new WeakSet<Request>();
-export function markPrivateNetworkRequest(req: Request, peerAddress: string | null): void {
-  const peer = peerAddress?.replace(/^::ffff:/i, "");
-  if (peer && (isPrivateLanHostname(peer) || isLoopbackHostname(peer))) privateNetworkRequests.add(req);
+const primaryListenerRequests = new WeakSet<Request>();
+export function markPrimaryListenerRequest(req: Request): void {
+  primaryListenerRequests.add(req);
 }
 export function isTrustedHubManagementRequest(req: Request): boolean { return trustedHubManagementRequests.has(req); }
 
@@ -67,7 +66,7 @@ export function markTrustedHubManagementRequest(req: Request): void {
 
 export function inheritTrustedHubManagementRequest(source: Request, target: Request): void {
   if (trustedHubManagementRequests.has(source)) trustedHubManagementRequests.add(target);
-  if (privateNetworkRequests.has(source)) privateNetworkRequests.add(target);
+  if (primaryListenerRequests.has(source)) primaryListenerRequests.add(target);
 }
 
 export function setCorsOrigin(port: number): void { _corsOrigin = `http://localhost:${port}`; }
@@ -345,7 +344,7 @@ export function isApiAuthRequired(config: Pick<OcxConfig, "hostname">): boolean 
 /** The primary LAN listener serves both management and inference without a login. */
 export function isTrustedLanRequest(req: Request, config: Pick<OcxConfig, "hostname">): boolean {
   const bind = config.hostname ?? "127.0.0.1";
-  if (!privateNetworkRequests.has(req) || trustedHubManagementRequests.has(req)
+  if (!primaryListenerRequests.has(req) || trustedHubManagementRequests.has(req)
     || !(isPrivateLanHostname(bind) || bind === "0.0.0.0" || bind === "::" || bind === "[::]")) return false;
   const url = new URL(req.url);
   if (!isPrivateLanHostname(url.hostname) && !isLoopbackHostname(url.hostname)) return false;

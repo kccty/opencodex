@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import {
+  adminTokenPromptAllowed,
   apiBaseForPlane,
   discoverApiTargets,
   relayUrlForPath,
@@ -61,6 +62,23 @@ afterEach(() => {
 });
 
 describe("two-plane API targets", () => {
+  test.each(["192.168.50.83", "10.0.0.1", "172.16.0.1", "172.31.255.254"])("private IPv4 %s never prompts, even with an old auth-required marker", hostname => {
+    win.happyDOM.setURL(`http://${hostname}:10100/`);
+    setRuntimeRole("hub");
+    expect(adminTokenPromptAllowed()).toBe(false);
+    const meta = win.document.createElement("meta");
+    meta.name = "opencodex-management-auth-required";
+    meta.content = "1";
+    win.document.head.append(meta);
+    expect(adminTokenPromptAllowed()).toBe(false);
+  });
+
+  test.each(["172.15.0.1", "172.32.0.1", "8.8.8.8", "hub.example.test"])("non-private destination %s retains the hub prompt", hostname => {
+    win.happyDOM.setURL(`http://${hostname}:10100/`);
+    setRuntimeRole("hub");
+    expect(adminTokenPromptAllowed()).toBe(true);
+  });
+
   test("404 selects the unchanged standalone same-origin target", async () => {
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
     const targets = await discoverApiTargets("");

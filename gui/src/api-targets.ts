@@ -32,28 +32,15 @@ export function isConnectedRuntime(): boolean {
 /**
  * May this dashboard ask the user to type an admin token?
  *
- * This asks the BIND, not the topology. The server decides whether a typed credential is
- * required with `isApiAuthRequired` — "is the bind hostname non-loopback" — and now states
- * that answer in the served document alongside the role.
- *
- * The role is the wrong predicate, and it was tried first: `standalone` + `hostname:
- * "0.0.0.0"` is an operator who deliberately exposed the dashboard and MUST type the admin
- * token (tests/server/server-management-auth.test.ts, "a non-loopback binding never issues a GUI
- * session from a forged loopback Host"), while a `hub` on loopback still mints its own
- * session. Gating on `role === "hub"` would have hidden the prompt from exactly the
- * operator who needs it.
- *
- * A loopback install mints its own session, so a refusal there is a Host/Origin
- * misconfiguration rather than a missing credential: prompting asks the user a question they
- * did not cause and cannot fix by answering (#3353). The published contract already promises
- * loopback "never asks for a token"
- * (docs-site/src/content/docs/guides/web-dashboard.md, "Sign-in").
- *
- * A missing tag means an older server, a separately hosted GUI, or the Vite dev server; those
- * fall back to the role so a hub dashboard still works against a server that predates the
- * tag, and everything else reads as loopback — the safe default this file already uses.
+ * Literal private IPv4 pages never ask, including pages served with an older auth marker.
+ * Other pages follow the server's request-specific policy, not its topology: a public
+ * standalone listener needs authentication, while a hub can bootstrap loopback sessions.
+ * Older servers without the marker fall back to the role. A loopback refusal is a
+ * Host/Origin configuration problem, not a missing token (#3353).
  */
 export function adminTokenPromptAllowed(): boolean {
+  if (typeof window !== "undefined"
+    && /^(?:10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)$/.test(window.location.hostname)) return false;
   if (typeof document !== "undefined") {
     const declared = document
       .querySelector('meta[name="opencodex-management-auth-required"]')
