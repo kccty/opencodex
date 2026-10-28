@@ -7,6 +7,7 @@ import { readBoundedCodexConfig } from "../codex/inject/bounded-config-reader";
 import { buildProviderTableBlockForTarget } from "../codex/inject/config-toml";
 import { standaloneCodexRoutingTarget, validateCodexRoutingTarget } from "../codex/inject/routing-target";
 import { readClientConnectionState } from "../client/state";
+import { isHubTransportPermitted } from "../lib/hub-transport";
 import { codexHasOtherTokenConsumers, codexTokenConfigShapeIsSafe } from "./codex-launch-policy";
 import { codexLaunchHomeIsOwned, codexLaunchProjectAliasIsOwned, codexLaunchSystemNamespaceIsSafe } from "./codex-launch-ownership";
 import type { CodexTokenRefusal, CodexTokenRefusalReporter } from "./codex-launch-diagnostics";
@@ -28,7 +29,7 @@ export function resolveCodexLaunchHome(env: Record<string, string | undefined>):
 }
 
 /** Config classification is a startup hint; credentials need an independently bound destination. */
-export function codexCredentialDestinationIsTrusted(home: string, systemNamespaceDirectory?: string, report?: CodexTokenRefusalReporter): boolean {
+export function codexCredentialDestinationIsTrusted(home: string, systemNamespaceDirectory?: string, report?: CodexTokenRefusalReporter, onTrustedHostname?: (hostname: string) => void): boolean {
   const refuse = (reason: CodexTokenRefusal): false => { report?.(reason); return false; };
   try {
     if (!codexLaunchHomeIsOwned(home)) return refuse("ownership");
@@ -51,7 +52,9 @@ export function codexCredentialDestinationIsTrusted(home: string, systemNamespac
     }
     const url = new URL(target.baseUrl);
     if (!target.requiresAdmissionToken) return refuse("admission");
-    if (url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname)) return refuse("loopback");
+    if (cfg.runtimeRole === "client"
+      ? !isHubTransportPermitted(url.origin)
+      : url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname)) return refuse("loopback");
     const content = readBoundedCodexConfig(join(home, "config.toml"));
     if (content === null) return refuse("configRead");
     const config = Bun.TOML.parse(content) as Record<string, unknown>;
@@ -88,6 +91,8 @@ export function codexCredentialDestinationIsTrusted(home: string, systemNamespac
     if (!provider || typeof provider.name !== "string") return refuse("providerTransport");
     const { name: _name, ...transport } = provider;
     const { name: _expectedName, ...expectedTransport } = expected;
-    return isDeepStrictEqual(transport, expectedTransport) || refuse("providerTransport");
+    if (!isDeepStrictEqual(transport, expectedTransport)) return refuse("providerTransport");
+    onTrustedHostname?.(url.hostname.replace(/^\[|\]$/g, ""));
+    return true;
   } catch { return refuse("inspection"); }
 }

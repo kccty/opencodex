@@ -307,7 +307,7 @@ describe("GET|HEAD /v1/catalog least-privilege data-plane route (#809)", () => {
     }
   });
 
-  test("rejects a missing credential and never widens /api/* for a data credential", async () => {
+  test("serves the catalog without a credential and never widens /api/* for a data credential", async () => {
     isolatedCodexHome = installIsolatedCodexHome("ocx-v1-catalog-auth-");
     writeFileSync(join(isolatedCodexHome.path, "opencodex-catalog.json"), JSON.stringify(catalogFixture));
     saveConfig(dataPlaneConfig());
@@ -316,7 +316,8 @@ describe("GET|HEAD /v1/catalog least-privilege data-plane route (#809)", () => {
     const server = startServer(0);
     try {
       const anonymous = await fetch(new URL("/v1/catalog", server.url));
-      expect(anonymous.status).toBe(401);
+      expect(anonymous.status).toBe(200);
+      await anonymous.body?.cancel();
 
       const wrong = await fetch(new URL("/v1/catalog", server.url), {
         headers: { "x-opencodex-api-key": "ocx_data_not_a_real_key" },

@@ -91,15 +91,14 @@ afterEach(() => {
 });
 
 describe("GET /v1/hub-state", () => {
-  test("refuses an unauthenticated read before it reveals whether this host is a hub", async () => {
+  test("serves an unauthenticated read now that data-plane authentication is disabled", async () => {
     saveConfig(hubConfig());
     const server = startServer(0);
     try {
       const res = await fetch(new URL("/v1/hub-state", server.url));
-      expect(res.status).toBe(401);
-      // The role is not disclosed on the 401 path: the gate runs after admission.
-      const body = await res.text();
-      expect(body).not.toContain("hub_state_not_a_hub");
+      expect(res.status).toBe(200);
+      const state = parseHubStateBody(JSON.parse(await res.text()));
+      expect(state?.runtimeRole).toBe("hub");
     } finally {
       await server.stop(true);
     }

@@ -96,7 +96,7 @@ export function codexLaunchProjectRefusalTest(name: string, body: (reason: "proj
 // Model a protected, empty machine configuration namespace inside this fixture.
 // Every other authority check uses real config/ownership IO. Native probes use production defaults.
 export const buildCodexPrivateFixtureLaunchEnv: typeof buildCodexLaunchEnv = (base, deps) => buildCodexLaunchEnv(base, {
-  credentialDestination: (home, report) => codexCredentialDestinationIsTrusted(home, join(home, "system-namespace-fixture"), report), ...deps,
+  credentialDestination: (home, report, onTrustedHostname) => codexCredentialDestinationIsTrusted(home, join(home, "system-namespace-fixture"), report, onTrustedHostname), ...deps,
 });
 
 /** Windows Temp grants Users create rights to descendants; model a private Codex home. */

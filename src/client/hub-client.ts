@@ -6,19 +6,7 @@ import { clearableDeadline } from "../lib/abort";
 import type { Desktop3pModelEntry } from "../claude/desktop-3p";
 import { assertDesktop3pModelsValid } from "../claude/desktop-3p-guard";
 
-/** Hub traffic may cross loopback or authenticated HTTPS, and nothing else. */
-function isHubTransportPermitted(origin: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(origin);
-  } catch {
-    return false;
-  }
-  if (url.protocol === "https:") return true;
-  if (url.protocol !== "http:") return false;
-  const host = url.hostname.toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
-}
+import { isHubAdminTransportPermitted, isHubTransportPermitted, isPrivateLanHttpOrigin } from "../lib/hub-transport";
 import {
   checkRemoteProtocolCompatibility,
   parseRemoteReadyMetadata,
@@ -89,9 +77,13 @@ async function fetchBounded(
 ): Promise<Response> {
   const timeout = safeTimeout(timeoutMs);
   const headerDeadline = timeoutScope === "headers" ? clearableDeadline(timeout) : null;
+  if (isPrivateLanHttpOrigin(url) && (new Headers(init.headers).has("x-opencodex-api-key") || init.body)) {
+    console.warn("Warning: private LAN HTTP is unencrypted; credentials and request content are visible on the network path.");
+  }
   try {
     const response = await fetchImpl(url, {
       ...init,
+      ...(isPrivateLanHttpOrigin(url) ? { proxy: false } : {}),
       redirect: "manual",
       signal: headerDeadline?.signal ?? AbortSignal.timeout(timeout),
     });
@@ -191,7 +183,7 @@ export function normalizeHubOrigin(input: string): string {
   if (!isHubTransportPermitted(parsed.origin)) {
     throw new HubClientError(
       "insecure_http_refused",
-      "Hub URLs require loopback or HTTPS; plaintext remote HTTP is not permitted",
+      "Hub URLs require loopback or HTTPS (private LAN IPv4 HTTP is also supported); plaintext remote HTTP is not permitted for public hosts",
     );
   }
   return parsed.origin;
@@ -248,13 +240,9 @@ export async function exchangeConnectPairingGrant(
 ): Promise<ConnectGuiSession> {
   const origin = normalizeHubOrigin(managementUrl);
   const browser = normalizeHubOrigin(browserOrigin);
-  // No opt-in. An earlier revision let `--allow-insecure-http` carry a grant over plaintext
-  // when the hub also opted in, on the theory that requiring both sides made it deliberate.
-  // Deliberateness is not the control that matters: the grant is readable by anything on the
-  // path and the session it mints is reusable. The hub refuses this exchange outright now, so
-  // sending it would only burn a single-use code against a certain rejection.
+  // Both peers share the literal-private-IPv4 exception; public HTTP remains refused.
   if (!isHubTransportPermitted(origin)) {
-    throw new HubClientError("insecure_http_refused", "Pairing requires loopback or HTTPS; plaintext HTTP cannot carry a grant");
+    throw new HubClientError("insecure_http_refused", "Pairing requires loopback, private LAN IPv4 or HTTPS");
   }
   const response = await fetchBounded(options.fetchImpl ?? fetch, `${origin}/opencodex-session`, {
     method: "POST",
@@ -299,8 +287,8 @@ export async function issueClientKey(
   if (!name.trim() || name.length > 80 || /[\x00-\x1f\x7f]/.test(name)) {
     throw new HubClientError("key_name_invalid", "Client key name is invalid");
   }
-  if (credential.kind === "admin" && new URL(origin).protocol !== "https:") {
-    throw new HubClientError("admin_http_refused", "Admin credentials may be sent only over HTTPS");
+  if (credential.kind === "admin" && !isHubAdminTransportPermitted(origin)) {
+    throw new HubClientError("admin_http_refused", "Admin credentials may be sent only over HTTPS or private LAN IPv4 HTTP");
   }
   const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
   if (credential.kind === "admin") {
@@ -335,8 +323,8 @@ export async function revokeClientKey(
 ): Promise<void> {
   const origin = normalizeHubOrigin(managementUrl);
   if (!id || id.length > 256) throw new HubClientError("key_id_invalid", "Client key id is invalid");
-  if (credential.kind === "admin" && new URL(origin).protocol !== "https:") {
-    throw new HubClientError("admin_http_refused", "Admin credentials may be sent only over HTTPS");
+  if (credential.kind === "admin" && !isHubAdminTransportPermitted(origin)) {
+    throw new HubClientError("admin_http_refused", "Admin credentials may be sent only over HTTPS or private LAN IPv4 HTTP");
   }
   const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
   if (credential.kind === "admin") headers.set("x-opencodex-api-key", credentialString(credential.value));
@@ -369,8 +357,8 @@ function rotationManagementHeaders(
 }
 
 function assertRotationAuthorityOrigin(origin: string, credential: { kind: "admin" } | { kind: "gui-session" }): void {
-  if (credential.kind === "admin" && new URL(origin).protocol !== "https:") {
-    throw new HubClientError("admin_http_refused", "Admin credentials may be sent only over HTTPS");
+  if (credential.kind === "admin" && !isHubAdminTransportPermitted(origin)) {
+    throw new HubClientError("admin_http_refused", "Admin credentials may be sent only over HTTPS or private LAN IPv4 HTTP");
   }
 }
 
@@ -489,7 +477,7 @@ export async function fetchHubUsage(
 ): Promise<HubUsageReport> {
   const origin = normalizeHubOrigin(serverUrl);
   if (!isHubTransportPermitted(origin)) {
-    throw new HubClientError("insecure_http_refused", "Client usage requires HTTPS or loopback HTTP");
+    throw new HubClientError("insecure_http_refused", "Client usage requires HTTPS, loopback or private LAN IPv4 HTTP");
   }
   const response = await fetchBounded(options.fetchImpl ?? fetch, `${origin}/v1/usage?${query}`, {
     method: "GET",
@@ -608,7 +596,7 @@ export async function downloadDesktop3pModels(
 ): Promise<{ version: 1; models: Desktop3pModelEntry[] }> {
   const origin = normalizeHubOrigin(serverUrl);
   if (!isHubTransportPermitted(origin)) {
-    throw new HubClientError("insecure_http_refused", "Desktop model snapshots require HTTPS or loopback HTTP");
+    throw new HubClientError("insecure_http_refused", "Desktop model snapshots require HTTPS, loopback or private LAN IPv4 HTTP");
   }
   try {
     // Keep fetchBounded's total request deadline active through body consumption;

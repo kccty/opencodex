@@ -140,17 +140,40 @@ describe("provider table ownership markers", () => {
       const first = deriveCodexInjectionPlan(native, ctx);
       expect(first.kind).toBe("ok");
       if (first.kind !== "ok") throw new Error(first.message);
+      // A provider-table plan now writes two marker-owned blocks (the table and the retained
+      // root override), so pin the count rather than assuming one.
+      const markerCount = first.content.split(eol).filter(line => line.trim() === OCX_ROUTING_MARKER_LINE).length;
+      expect(markerCount).toBeGreaterThanOrEqual(1);
       let current = first.content;
       for (let cycle = 0; cycle < 5; cycle++) {
         const next = deriveCodexInjectionPlan(current, ctx);
         expect(next.kind).toBe("ok");
         if (next.kind !== "ok") throw new Error(next.message);
         expect(next.content).toBe(first.content);
-        expect(next.content.split(eol).filter(line => line.trim() === OCX_ROUTING_MARKER_LINE)).toHaveLength(1);
+        expect(next.content.split(eol).filter(line => line.trim() === OCX_ROUTING_MARKER_LINE)).toHaveLength(markerCount);
         current = next.content;
       }
       expect(current.startsWith(bom + "# user comment")).toBe(true);
     }
+  });
+
+  test("a provider-table target retains the root openai_base_url for openai-tagged threads", () => {
+    const ctx = {
+      config: undefined,
+      routingTarget: { baseUrl: "http://192.168.50.83:10100/v1", requiresAdmissionToken: true, tokenEnv: "OPENCODEX_API_AUTH_TOKEN" as const },
+      catalogPathOption: null,
+      journalReadOnly: true,
+    };
+    const plan = deriveCodexInjectionPlan('model = "gpt-5.5"\n', ctx);
+    expect(plan.kind).toBe("ok");
+    if (plan.kind !== "ok") throw new Error(plan.message);
+    expect(plan.keepRootOverrideAlongsideTable).toBe(true);
+    expect(plan.content).toContain('model_provider = "opencodex"');
+    expect(plan.content).toContain("[model_providers.opencodex]");
+    expect(plan.content).toContain('env_key = "OPENCODEX_API_AUTH_TOKEN"');
+    // Without this line a thread already tagged `openai` resolves to api.openai.com; the table
+    // only changes the DEFAULT provider for new threads.
+    expect(plan.content).toContain('openai_base_url = "http://192.168.50.83:10100/v1"');
   });
 
   test.each([

@@ -816,7 +816,7 @@ async function injectCodexConfigImpl(
       ...(effectivePlan.nativeSubagentDefaultsWarning ? { nativeSubagentDefaultsWarning: effectivePlan.nativeSubagentDefaultsWarning } : {}),
       ...(effectivePlan.historyRelabelRefusal ? { historyPreflightFailureReason: effectivePlan.historyRelabelRefusal } : {}),
       message:
-        `Injected opencodex as default provider into Codex config (client-side compaction mode; ChatGPT auth remains required).\n` +
+        `Injected opencodex as default provider into Codex config (${routingTarget.clientCompaction === true ? "client-side compaction mode" : "provider-table mode"}; ChatGPT auth remains required).\n` +
         `  Your root openai_base_url was left exactly as you set it, so opencodex did not add its own.\n` +
         catalogMessage +
         historyMessage +
@@ -824,7 +824,6 @@ async function injectCodexConfigImpl(
         effectivePlan.managedDefaultsMessage +
         `  New threads use the injected opencodex provider and route through the proxy.\n` +
         `  Threads already tagged openai resolve through Codex's built-in provider, which your root openai_base_url points at.\n` +
-        `  No root URL change is required to enable client-side compaction for new threads.\n` +
         `  Fallback: codex --profile opencodex (same behavior)`,
     };
   }

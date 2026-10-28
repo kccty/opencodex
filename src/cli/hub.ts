@@ -1,4 +1,5 @@
 import type { OcxConfig, OcxConnectedClientId } from "../types";
+import { isHubTransportPermitted, isPrivateLanHttpOrigin } from "../lib/hub-transport";
 import { canonicalGuiBrowserOrigin, canonicalHttpOrigin } from "../lib/gui-pair-capability";
 import { findLiveProxy, probeHostname, type LiveProxy } from "../server/proxy-liveness";
 import {
@@ -58,13 +59,9 @@ function isLoopbackOrigin(origin: string): boolean {
   }
 }
 
-/** Loopback or HTTPS, the rule `consumeGuiPairingGrant` enforces on the hub side. */
+/** Share the exact transport rule with the hub and connecting client. */
 export function pairingOriginUsable(origin: string): boolean {
-  try {
-    return new URL(origin).protocol === "https:" || isLoopbackOrigin(origin);
-  } catch {
-    return false;
-  }
+  return isHubTransportPermitted(origin);
 }
 
 export function parseHubInviteArgs(args: string[]): HubInviteOptions | null {
@@ -281,8 +278,8 @@ async function runInvite(args: string[], deps: HubCommandDeps): Promise<number> 
   }
   if (!pairingOriginUsable(managementPublic)) {
     console.error(
-      `hub.managementPublicOrigin ${managementPublic} is non-loopback plain HTTP, which cannot carry a `
-        + "pairing code. Put management behind an HTTPS frontend (Tailscale Serve) and set that origin.",
+      `hub.managementPublicOrigin ${managementPublic} uses unsupported plain HTTP and cannot carry a pairing code. Use HTTPS, `
+        + "loopback or an explicit private LAN IPv4 HTTP origin.",
     );
     return 1;
   }
@@ -327,6 +324,9 @@ async function runInvite(args: string[], deps: HubCommandDeps): Promise<number> 
     return 1;
   }
   const dataUrl = resolved.dataUrl;
+  if (isPrivateLanHttpOrigin(dataUrl) || isPrivateLanHttpOrigin(managementPublic)) {
+    console.error("Warning: private LAN HTTP is unencrypted; use only a trusted LAN. Network-path observers can read credentials and request content.");
+  }
   const result = await (deps.requestPairingGrant ?? requestBoundGuiPairingGrant)(target, browserOrigin, {
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     requireLocalIntent: false,

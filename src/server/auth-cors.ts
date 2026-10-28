@@ -48,11 +48,17 @@ import { vercelGatewayRoutingConfigError } from "../providers/vercel-gateway-rou
 import { googleVertexLocationConfigError } from "../providers/google-vertex-location";
 import { xaiResponsesOptInState } from "../providers/xai-responses-opt-in";
 import { authorizationCredential } from "../lib/authorization-scheme";
+import { isPrivateLanHostname } from "../lib/hub-transport";
 
 let _corsOrigin = "http://localhost:10100";
 // Listener identity is process-local. Never infer this trust from forwarded headers: the
 // request handler marks a Request only after resolving the actual Bun Server instance.
 const trustedHubManagementRequests = new WeakSet<Request>();
+const privateNetworkRequests = new WeakSet<Request>();
+export function markPrivateNetworkRequest(req: Request, peerAddress: string | null): void {
+  const peer = peerAddress?.replace(/^::ffff:/i, "");
+  if (peer && (isPrivateLanHostname(peer) || isLoopbackHostname(peer))) privateNetworkRequests.add(req);
+}
 export function isTrustedHubManagementRequest(req: Request): boolean { return trustedHubManagementRequests.has(req); }
 
 export function markTrustedHubManagementRequest(req: Request): void {
@@ -61,6 +67,7 @@ export function markTrustedHubManagementRequest(req: Request): void {
 
 export function inheritTrustedHubManagementRequest(source: Request, target: Request): void {
   if (trustedHubManagementRequests.has(source)) trustedHubManagementRequests.add(target);
+  if (privateNetworkRequests.has(source)) privateNetworkRequests.add(target);
 }
 
 export function setCorsOrigin(port: number): void { _corsOrigin = `http://localhost:${port}`; }
@@ -160,6 +167,7 @@ export function managementRequestOrigin(req: Request, config: OcxConfig): string
       return null;
     }
   }
+  if (isTrustedLanRequest(req, config)) return new URL(req.url).origin;
   if (trustedHubManagementRequests.has(req)) {
     if (config.runtimeRole !== "hub") return null;
     const canonical = canonicalHubManagementOrigin(config.hub?.managementPublicOrigin);
@@ -334,6 +342,19 @@ export function isApiAuthRequired(config: Pick<OcxConfig, "hostname">): boolean 
   return !isLoopbackHostname(config.hostname);
 }
 
+/** The primary LAN listener serves both management and inference without a login. */
+export function isTrustedLanRequest(req: Request, config: Pick<OcxConfig, "hostname">): boolean {
+  const bind = config.hostname ?? "127.0.0.1";
+  if (!privateNetworkRequests.has(req) || trustedHubManagementRequests.has(req)
+    || !(isPrivateLanHostname(bind) || bind === "0.0.0.0" || bind === "::" || bind === "[::]")) return false;
+  const url = new URL(req.url);
+  if (!isPrivateLanHostname(url.hostname) && !isLoopbackHostname(url.hostname)) return false;
+  const host = req.headers.get("Host");
+  if (!host || host.toLowerCase() !== url.host.toLowerCase()) return false;
+  const origin = req.headers.get("Origin");
+  return !origin || origin === url.origin;
+}
+
 /**
  * The slice of config that decides admission and CORS, and nothing else (#1102).
  *
@@ -376,15 +397,12 @@ export function requestPolicyView(
   };
 }
 
-export function assertServerAuthConfig(config: OcxConfig): void {
-  const hasConfiguredDataCredential = !!configuredApiAuthToken(config)
-    || (config.apiKeys ?? []).some(entry => !!entry.key.trim());
-  if (isApiAuthRequired(config) && !hasConfiguredDataCredential) {
-    throw new Error(
-      "A data-plane credential (OPENCODEX_API_AUTH_TOKEN or config.apiKeys) is required when binding opencodex to a non-loopback hostname",
-    );
-  }
-}
+/**
+ * Data-plane authentication is disabled (see {@link resolveApiAuth}), so binding a non-loopback
+ * hostname no longer requires a token or a configured key. The gate stays in the startup
+ * sequence as the one named place this policy used to be enforced.
+ */
+export function assertServerAuthConfig(_config: OcxConfig): void {}
 
 function secretEquals(actual: string, expected: string | undefined): boolean {
   if (!expected) return false;
@@ -411,7 +429,7 @@ function secretEquals(actual: string, expected: string | undefined): boolean {
  * Responses transport is admissible, but only if the upstream credential is then guaranteed to
  * be substituted. Collapsing the two is what made that flow unexpressible.
  */
-export type DataPlaneAdmissionSource = "loopback" | "dedicated" | "bearer" | "x-api-key";
+export type DataPlaneAdmissionSource = "loopback" | "dedicated" | "bearer" | "x-api-key" | "anonymous";
 
 /**
  * Process-local, salted identity of the admission secret that was actually matched.
@@ -436,7 +454,28 @@ function mintContextPrincipal(kind: string, keyId: string, credential: string): 
 export type DataPlaneAdmission =
   | { kind: "configured"; keyId: string; source: DataPlaneAdmissionSource; contextPrincipalId?: string }
   | { kind: "environment"; source: DataPlaneAdmissionSource; contextPrincipalId?: string }
-  | { kind: "loopback"; source: "loopback" };
+  | { kind: "loopback"; source: "loopback" }
+  | { kind: "anonymous"; source: "anonymous" };
+
+/**
+ * Data-plane authentication is disabled: a caller that presents no credential, or a
+ * caller-owned bearer/x-api-key that is not one of ours, is admitted with an anonymous
+ * identity. A credential that resolves still names its principal, so usage attribution keeps
+ * working for clients that send their key. A credential that has our own key shape but does
+ * not resolve is still refused: silently demoting a revoked or foreign proxy key to anonymous
+ * would hide the misconfiguration and make an expired key look healthy.
+ */
+function anonymousAdmission(): DataPlaneAdmission {
+  return { kind: "anonymous", source: "anonymous" };
+}
+
+/**
+ * A Remote Link ingress listener stays keyed: its link key is the tunnel's caller proof, and
+ * admitting an anonymous request there would let any local process relay through the Home.
+ */
+function anonymousAdmissionAllowed(config: RequestPolicyView): boolean {
+  return !config.linkIngress;
+}
 
 /**
  * Which admission secret `token` is, or null when it is none of them.
@@ -537,7 +576,7 @@ export function resolveDurableReplayPrincipal(
 }
 
 /** Whether `token` is a data-plane admission secret. */
-export function isDataPlaneAdmissionSecret(token: string, config: OcxConfig): boolean {
+export function isDataPlaneAdmissionSecret(token: string, config: Pick<OcxConfig, "apiKeys">): boolean {
   return resolveDataPlaneAdmissionSecret(token, config) !== null;
 }
 
@@ -609,7 +648,7 @@ export function isManagementAdmissionSecret(token: string): boolean {
 }
 
 /** Whether `token` is one of the proxy's own admission secrets and must never reach an upstream. */
-export function isProxyAdmissionSecret(token: string, config: OcxConfig): boolean {
+export function isProxyAdmissionSecret(token: string, config: Pick<OcxConfig, "apiKeys">): boolean {
   const actual = token.trim();
   if (!actual) return false;
   if (/^ocx_(?:data|admin|session)_/.test(actual) || /^ocx_[0-9a-f]{40}$/.test(actual)) return true;
@@ -646,11 +685,19 @@ export function resolveApiAuth(req: Request, config: RequestPolicyView): DataPla
   const dedicated = req.headers.get("x-opencodex-api-key")?.trim();
   if (dedicated) return resolveDataPlaneAdmissionSecret(dedicated, config, "dedicated", { linkIngress: config.linkIngress?.allowedKeyIds });
   const bearer = authorizationCredential(req.headers);
-  if (bearer) return resolveDataPlaneAdmissionSecret(bearer, config, "bearer", { linkIngress: config.linkIngress?.allowedKeyIds });
+  if (bearer) {
+    const resolved = resolveDataPlaneAdmissionSecret(bearer, config, "bearer", { linkIngress: config.linkIngress?.allowedKeyIds });
+    if (resolved) return resolved;
+    return isProxyAdmissionSecret(bearer, config) || !anonymousAdmissionAllowed(config) ? null : anonymousAdmission();
+  }
   // Anthropic-SDK clients (Claude Code with ANTHROPIC_API_KEY) authenticate via x-api-key.
   const apiKey = req.headers.get("x-api-key")?.trim();
-  if (apiKey) return resolveDataPlaneAdmissionSecret(apiKey, config, "x-api-key", { linkIngress: config.linkIngress?.allowedKeyIds });
-  return null;
+  if (apiKey) {
+    const resolved = resolveDataPlaneAdmissionSecret(apiKey, config, "x-api-key", { linkIngress: config.linkIngress?.allowedKeyIds });
+    if (resolved) return resolved;
+    return isProxyAdmissionSecret(apiKey, config) || !anonymousAdmissionAllowed(config) ? null : anonymousAdmission();
+  }
+  return anonymousAdmissionAllowed(config) ? anonymousAdmission() : null;
 }
 
 export function hasValidApiAuth(req: Request, config: RequestPolicyView): boolean {
@@ -663,9 +710,9 @@ export function requireApiAuth(req: Request, config: RequestPolicyView, _kind: "
 }
 
 /**
- * Admission for OpenAI Responses transports whose Authorization header belongs to
- * Codex Direct. Remote binds must use the dedicated proxy header so the two bearer
- * domains can never be confused.
+ * Admission for OpenAI Responses transports whose Authorization header belongs to Codex
+ * Direct. Data-plane authentication is disabled, so a caller-owned bearer is admitted as
+ * anonymous and a key that looks like one of ours still has to resolve.
  */
 export function resolveResponsesApiAuth(req: Request, config: RequestPolicyView): DataPlaneAdmission | null {
   if (!isApiAuthRequired(config)) return { kind: "loopback", source: "loopback" };
@@ -678,9 +725,16 @@ export function resolveResponsesApiAuth(req: Request, config: RequestPolicyView)
   // materializeCodexUpstreamAuth. A bearer that is NOT our secret stays unadmitted here and
   // remains Codex Direct passthrough, so the two bearer domains still never mix.
   const bearer = authorizationCredential(req.headers);
-  if (bearer) return resolveDataPlaneAdmissionSecret(bearer, config, "bearer", { linkIngress: config.linkIngress?.allowedKeyIds });
+  if (bearer) {
+    const resolved = resolveDataPlaneAdmissionSecret(bearer, config, "bearer", { linkIngress: config.linkIngress?.allowedKeyIds });
+    if (resolved) return resolved;
+    // A caller-owned Codex credential (the built-in `openai` provider's ChatGPT bearer) is
+    // admitted as anonymous; our own revoked or foreign key shape is not.
+    return isProxyAdmissionSecret(bearer, config) || !anonymousAdmissionAllowed(config) ? null : anonymousAdmission();
+  }
   // `x-api-key` is deliberately NOT accepted on this transport.
-  return null;
+  if (req.headers.get("x-api-key")?.trim()) return null;
+  return anonymousAdmissionAllowed(config) ? anonymousAdmission() : null;
 }
 
 

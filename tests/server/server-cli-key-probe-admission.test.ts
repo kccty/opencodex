@@ -57,11 +57,15 @@ for (const protocol of ["responses", "chat", "messages"] as const) {
             return handleClaudeMessages(req, config, context);
           }) as typeof fetch,
         });
-        expect(code).toBe(scenario === "valid" || scenario === "changed-policy" ? 0 : 1);
-        expect(dataCalls).toBe(scenario === "authless" ? 1 : 2);
-        expect(providerCalls).toBe(scenario === "valid" || scenario === "changed-policy" ? 1 : 0);
+        // Data-plane authentication is disabled, so the credentialless control is no longer a
+        // 401: the probe reports the weaker fact and still exercises the keyed request. A wrong
+        // dedicated key is refused on that request, which is what still fails the probe.
+        expect(code).toBe(scenario === "wrong" ? 1 : 0);
+        expect(dataCalls).toBe(2);
+        expect(providerCalls).toBe(scenario === "wrong" ? 0 : 1);
         const report = JSON.parse(logs.at(-1)!);
-        expect(report.control.outcome).toBe(scenario === "authless" ? "unavailable" : "credential_required");
+        expect(report.control.outcome).toBe("admission_disabled");
+        if (scenario === "wrong") expect(report.request.status).toBe(401);
         if (scenario === "changed-policy") {
           // The wrong key succeeds after policy changes: this is an observation, never an atomic admission certificate.
           expect(report.request.outcome).toBe("succeeded");

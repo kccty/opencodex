@@ -158,7 +158,7 @@ export type CodexLaunchEnvDeps = {
   args?: readonly string[];
   /** Test seam; production reads the hardened service token file. */
   serviceToken?: (base: CodexLaunchEnv) => string | null;
-  credentialDestination?: (home: string, report?: CodexTokenRefusalReporter) => boolean;
+  credentialDestination?: (home: string, report?: CodexTokenRefusalReporter, onTrustedHostname?: (hostname: string) => void) => boolean;
 };
 
 /** Read the client admission credential from this installation's service-token file. */
@@ -191,18 +191,21 @@ export function buildCodexLaunchEnv(
     const home = resolveCodexLaunchHome(env);
     if (!home) return withhold("home");
     let refusal: CodexTokenRefusal = "destination";
+    let trustedHostname: string | undefined;
     const report: CodexTokenRefusalReporter = reason => { refusal = reason; };
+    const onTrustedHostname = (hostname: string) => { trustedHostname = hostname; };
     const trusted = deps.credentialDestination
-      ? deps.credentialDestination(home, report)
-      : codexCredentialDestinationIsTrusted(home, undefined, report);
+      ? deps.credentialDestination(home, report, onTrustedHostname)
+      : codexCredentialDestinationIsTrusted(home, undefined, report, onTrustedHostname);
     if (!trusted) return withhold(refusal);
     const token = (deps.serviceToken ?? defaultServiceToken)(env);
     if (!token) return withhold("credential");
     if (tokenCollidesWithAdmin(token, env)) return withhold("collision");
     // Reqwest's default transport can discover OS proxies even without proxy
-    // env. Bind both bypass spellings to the allowed loopback hosts, preserving
+    // env. Bind both bypass spellings to loopback and the verified destination, preserving
     // existing entries and removing conflicting case aliases before handoff.
     const bypass = ["127.0.0.1", "::1"];
+    if (trustedHostname && !bypass.includes(trustedHostname)) bypass.push(trustedHostname);
     for (const key of Object.keys(env)) if (/^no_proxy$/i.test(key)) {
       if (env[key]) bypass.push(env[key]!);
       delete env[key];

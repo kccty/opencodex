@@ -22,7 +22,9 @@ bun run dev:gui
 
 ## 登录
 
-通过 `localhost`、`127.0.0.1` 等 loopback 地址打开仪表盘时，它会自动获得一个短期 GUI session，因此通常无需输入 token。在非 loopback 主机上公开仪表盘时，必须使用 `OPENCODEX_ADMIN_AUTH_TOKEN` 或自动生成的 `~/.opencodex/admin-api-token` 文件中的管理员 token。
+局域网 IPv4 默认免登录，无需信任开关或 token。将 `hostname` 设为 `0.0.0.0`，关闭 `unauthenticatedLoopbackListener` 和 `hub.managementIngress`，即可通过同一个端口访问 Web、管理 API 和模型接口；本机也能使用 `127.0.0.1`。刷新会自动进入。能访问此局域网地址的设备都拥有管理权限，包括查看已存储的数据密钥。公网地址和域名访问仍需要认证。
+
+通过 `localhost`、`127.0.0.1` 等 loopback 地址打开本机绑定的仪表盘时，它会自动获得短期 GUI session，通常无需输入 token。公网地址或域名上的仪表盘仍需 `OPENCODEX_ADMIN_AUTH_TOKEN` 或 `~/.opencodex/admin-api-token` 中的管理员 token。
 
 远程仪表盘会显示标准密码表单，浏览器密码管理器可以提示保存并自动填充 token。仪表盘本身只在内存中保存 token，不会写入 `localStorage` 或 `sessionStorage`；是否持久保存完全由浏览器或密码管理器决定。
 

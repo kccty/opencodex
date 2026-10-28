@@ -312,7 +312,7 @@ export interface PersistedUsageEntry {
   /** Matched configured key id; absent for environment/loopback admissions and
    *  for every row written before attribution existed. */
   apiKeyId?: string;
-  admissionKind?: "configured" | "environment" | "loopback";
+  admissionKind?: "configured" | "environment" | "loopback" | "anonymous";
   /** The inbound wire, not the client product — see `surface`. */
   inboundProtocol?: "responses" | "chat" | "messages";
   /** Stable non-PII identity for Codex Pool usage; absent for Direct/non-Codex traffic. */
@@ -468,7 +468,7 @@ export function isKnownUsageSurface(value: unknown): value is NonNullable<Persis
 }
 
 const KNOWN_ADMISSION_KINDS = new Set<NonNullable<PersistedUsageEntry["admissionKind"]>>([
-  "configured", "environment", "loopback",
+  "configured", "environment", "loopback", "anonymous",
 ]);
 
 const KNOWN_INBOUND_PROTOCOLS = new Set<NonNullable<PersistedUsageEntry["inboundProtocol"]>>([

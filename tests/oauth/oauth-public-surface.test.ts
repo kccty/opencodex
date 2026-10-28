@@ -856,7 +856,10 @@ describe("legacy ChatGPT OAuth public-surface exclusion", () => {
       const forgedLoopbackRequest = new Request("http://localhost:10444/api/config", {
         headers: { host: "localhost:10444" },
       });
-      expect(requireApiAuth(forgedLoopbackRequest, liveConfig, "management")?.status).toBe(401);
+      // Data-plane authentication is disabled, so this helper admits a forged loopback Host;
+      // what reconciliation must preserve is the external bind itself, pinned by the
+      // `isApiAuthRequired` assertion above. The management plane keeps its own gate.
+      expect(requireApiAuth(forgedLoopbackRequest, liveConfig, "management")).toBeNull();
       expect(loadConfig().providers.xai).toBeUndefined();
 
       // A second disk edit must be compared with the state OAuth just adopted, not

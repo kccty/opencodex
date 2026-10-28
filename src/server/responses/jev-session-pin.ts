@@ -57,6 +57,7 @@ let fenceEvictedAt = 0;
 function callerNamespace(admission: DataPlaneAdmission | undefined): string {
   if (!admission) return "unadmitted";
   if (admission.kind === "loopback") return "loopback";
+  if (admission.kind === "anonymous") return "anonymous";
   if (admission.contextPrincipalId) return `principal:${admission.contextPrincipalId}`;
   return admission.kind === "configured" ? `key:${admission.keyId}` : admission.kind;
 }

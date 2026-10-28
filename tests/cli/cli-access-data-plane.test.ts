@@ -52,10 +52,13 @@ for (const body of [{}, { error: { ...native.error, message: "different" } }, { 
     expect(JSON.parse(logs[0]!).request.outcome).toBe("not_run");
   });
 }
-for (const status of [200, 400, 403, 500]) test(`control ${status} unavailable`, async () => {
+// Authentication is disabled, so a 400/403 control is the handler answering a deliberately
+// malformed body; the probe proceeds to the keyed request (which also fails here) and reports a
+// failure. A 200 or 5xx control is still an unusable surface and stops before inference.
+for (const [status, calls] of [[200, 1], [400, 2], [403, 2], [500, 1]] as const) test(`control ${status} is handled`, async () => {
   let count = 0;
   expect(await handleSelectedKeyTest(["x", "--api-key-stdin"], deps((async () => { count++; return Response.json(native, { status }); }) as typeof fetch))).toBe(1);
-  expect(count).toBe(1);
+  expect(count).toBe(calls);
 });
 for (const protocol of ["chat", "responses", "messages"] as const) test(`${protocol} unsupported payload and unsafe usage rejected`, () => {
   for (const raw of [{}, [], { error: "bad" }, { ...success(protocol) as object, usage: { input_tokens: -1, prompt_tokens: -1 } }, { ...success(protocol) as object, usage: { input_tokens: "2", prompt_tokens: "2" } }]) {

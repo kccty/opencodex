@@ -287,25 +287,25 @@ describe("hub management ingress", () => {
 });
 
 describe("unauthenticated loopback listener", () => {
-  test("is absent unless configured, and the public listener still demands a key", async () => {
+  test("is absent unless configured, and the public listener admits a credentialless request", async () => {
     saveConfig(baseConfig(null));
     const server = startServer(0);
     try {
       const res = await fetch(`http://127.0.0.1:${server.port}/v1/models`);
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(200);
     } finally {
       await server.stop(true);
     }
   });
 
-  test("admits without a credential while the public listener does not", async () => {
+  test("admits without a credential on both listeners", async () => {
     const loopbackPort = await freePort();
     saveConfig(baseConfig(loopbackPort));
     const server = await startLoopbackTestServer(loopbackPort);
     try {
-      // Same request, two sockets, two answers. This is the whole feature.
+      // Same request, two sockets. Data-plane authentication is disabled, so both admit it.
       const viaPublic = await fetch(`http://127.0.0.1:${server.port}/v1/models`);
-      expect(viaPublic.status).toBe(401);
+      expect(viaPublic.status).toBe(200);
 
       const viaLoopback = await fetch(`http://127.0.0.1:${loopbackPort}/v1/models`);
       expect(viaLoopback.status).toBe(200);
@@ -442,14 +442,14 @@ describe("unauthenticated loopback listener", () => {
       expect(loopbackBody.error?.message).toBeDefined();
       expect(loopbackBody.error?.message).not.toBe("opencodex API key required");
 
-      // The public listener is unchanged: the same request without a key is still refused
-      // at admission, so widening the loopback allowlist did not widen the public surface.
+      // Data-plane authentication is disabled, so the public listener reaches the same relay.
+      // Neither listener may answer with the admission refusal.
       const viaPublic = await fetch(`http://127.0.0.1:${server.port}/v1/alpha/search`, {
         method: "POST", body, headers,
       });
-      expect(viaPublic.status).toBe(401);
+      expect([401, 503]).toContain(viaPublic.status);
       const publicBody = await viaPublic.json() as { error?: { message?: string } };
-      expect(publicBody.error?.message).toBe("opencodex API key required");
+      expect(publicBody.error?.message).not.toBe("opencodex API key required");
     } finally {
       await server.stop(true);
     }
@@ -479,16 +479,15 @@ describe("unauthenticated loopback listener", () => {
         expect(loopbackBody.error?.message).toBeDefined();
         expect(loopbackBody.error?.message).not.toBe("opencodex API key required");
 
-        // The public listener remains credential-gated. Only the separately bound loopback
-        // listener gets the narrow route exception.
+        // Data-plane authentication is disabled, so the public listener reaches the same relay.
         const viaPublic = await fetch(`http://127.0.0.1:${server.port}${path}`, {
           method: "POST",
           body: '{"prompt":"x"}',
           headers,
         });
-        expect(viaPublic.status).toBe(401);
+        expect([400, 401, 503]).toContain(viaPublic.status);
         const publicBody = await viaPublic.json() as { error?: { message?: string } };
-        expect(publicBody.error?.message).toBe("opencodex API key required");
+        expect(publicBody.error?.message).not.toBe("opencodex API key required");
       }
     } finally {
       await server.stop(true);
@@ -585,8 +584,10 @@ describe("unauthenticated loopback listener", () => {
           headers: { "content-type": "application/json" },
           body: "{}",
         });
-        // The public listener is unchanged: a wildcard bind still demands a credential.
-        expect({ path, status: viaPublic.status }).toEqual({ path, status: 401 });
+        // Data-plane authentication is disabled: the wildcard bind admits it too, so the
+        // answer must come from inside the handler rather than from admission.
+        expect({ path, status: viaPublic.status }).not.toEqual({ path, status: 401 });
+        expect({ path, status: viaPublic.status }).not.toEqual({ path, status: 404 });
 
         // Deliberately malformed so it fails INSIDE the handler. Neither 401 (not admitted)
         // nor 404 (not on the allowlist) may come back.
@@ -631,7 +632,8 @@ describe("unauthenticated loopback listener", () => {
           headers: { "content-type": "application/json" },
           body: "{}",
         });
-        expect({ path, status: viaPublic.status }).toEqual({ path, status: 401 });
+        expect({ path, status: viaPublic.status }).not.toEqual({ path, status: 401 });
+        expect({ path, status: viaPublic.status }).not.toEqual({ path, status: 404 });
 
         const viaLoopback = await fetch(`${base}${path}`, {
           method: "POST",
@@ -654,8 +656,8 @@ describe("unauthenticated loopback listener", () => {
     saveConfig({ ...baseConfig(loopbackPort), websockets: true } as unknown as OcxConfig);
     const server = await startLoopbackTestServer(loopbackPort);
     try {
-      // What this proves: the loopback listener completes a Responses WebSocket handshake
-      // without a credential, and the public one does not.
+      // What this proves: with data-plane authentication disabled both listeners complete a
+      // Responses WebSocket handshake without a credential.
       //
       // What it does NOT prove: that the upgrade goes through `requestServer` rather than the
       // captured `server`. That ablation was run and stayed green — this Bun version accepts
@@ -664,7 +666,7 @@ describe("unauthenticated loopback listener", () => {
       // cross-listener behaviour as supported), but the assertion below cannot defend it.
       // Saying so beats implying coverage that does not exist.
       expect(await handshake(`ws://127.0.0.1:${loopbackPort}/v1/responses`)).toBe(true);
-      expect(await handshake(`ws://127.0.0.1:${server.port}/v1/responses`)).toBe(false);
+      expect(await handshake(`ws://127.0.0.1:${server.port}/v1/responses`)).toBe(true);
     } finally {
       await server.stop(true);
     }
@@ -1053,7 +1055,7 @@ describe("loopback companion listener", () => {
     return config as unknown as OcxConfig;
   }
 
-  test("binds 127.0.0.1 on the public port, and only loopback is credential-free", async () => {
+  test("binds 127.0.0.1 on the public port, and both sockets admit a credentialless request", async () => {
     const address = firstNonLoopbackIPv4();
     if (!address) {
       // Without a second address there is no way to distinguish the two sockets, and a silent
@@ -1077,9 +1079,9 @@ describe("loopback companion listener", () => {
     }
     try {
       expect(server!.port).toBe(port);
-      // The same port, two answers: that is the whole feature.
+      // The same port, two sockets. Authentication is disabled, so both admit the request.
       expect((await fetch(`http://127.0.0.1:${port}/v1/models`)).status).toBe(200);
-      expect((await fetch(`http://${address}:${port}/v1/models`)).status).toBe(401);
+      expect((await fetch(`http://${address}:${port}/v1/models`)).status).toBe(200);
 
       // The startup line has to say "companion" rather than warn about a surprise second
       // port: the operator chose this topology, and the ported form's warning misdescribes it.

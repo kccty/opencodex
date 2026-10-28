@@ -15,7 +15,7 @@ import { startServer } from "../../src/server";
 import { readCodexAccountRecord, saveCodexAccountCredential } from "../../src/codex/account-store";
 import type { OcxConfig } from "../../src/types";
 import { serveGuiFile, serveSessionBootstrap } from "../../src/server/gui-static";
-import { isProxyAdmissionSecret } from "../../src/server/auth-cors";
+import { isProxyAdmissionSecret, markPrivateNetworkRequest } from "../../src/server/auth-cors";
 import {
   createManagementSessionControl,
   initializeManagementAuthState,
@@ -585,7 +585,7 @@ describe("management and data-plane credential separation", () => {
     }
   });
 
-  test("Codex backend aliases retain data-plane authentication and cannot enter management", async () => {
+  test("Codex backend aliases admit anonymous calls but cannot enter management", async () => {
     enableContextRelay();
     saveConfig(remoteConfig());
     const server = startServer(0);
@@ -593,11 +593,13 @@ describe("management and data-plane credential separation", () => {
       for (const token of [undefined, "admin-secret", "data-secret"]) {
         const headers: Record<string, string> = token ? { "x-opencodex-api-key": token } : {};
         const models = await fetch(new URL("/backend-api/codex/models", server.url), { headers });
-        expect(models.status).toBe(token === "data-secret" ? 200 : 401);
+        expect(models.status).toBe(token === "admin-secret" ? 401 : 200);
+        await models.text();
         const context = await fetch(new URL("/backend-api/codex/alpha/notes/v2/read_file", server.url), {
           method: "POST", headers, body: "{}",
         });
-        expect(context.status).toBe(token === "data-secret" ? 400 : 401);
+        expect(context.status).toBe(token === "data-secret" ? 400 : token === "admin-secret" ? 401 : 403);
+        await context.text();
         const management = await fetch(new URL("/backend-api/codex/api/config", server.url), { headers });
         expect(management.status).toBe(404);
       }
@@ -646,7 +648,7 @@ describe("management and data-plane credential separation", () => {
     }
   });
 
-  test("context bearer admission reaches body validation without accepting foreign credentials", async () => {
+  test("context bearer admission requires a context principal after anonymous admission", async () => {
     enableContextRelay();
     saveConfig(remoteConfig());
     const server = startServer(0);
@@ -656,8 +658,9 @@ describe("management and data-plane credential separation", () => {
           const response = await fetch(new URL(`${prefix}/alpha/notes/v2/read_file`, server.url), {
             method: "POST", headers: { authorization: `Bearer ${token}` }, body: "{}",
           });
-          expect(response.status).toBe(token === "data-secret" ? 400 : 401);
-          if (token === "data-secret") expect(await response.text()).toContain("context.session_id");
+          expect(response.status).toBe(token === "data-secret" ? 400 : token === "admin-secret" ? 401 : 403);
+          const body = await response.text();
+          if (token === "data-secret") expect(body).toContain("context.session_id");
         }
       }
     } finally {
@@ -1668,13 +1671,14 @@ describe("management and data-plane credential separation", () => {
     }
   });
 
-  test("a non-loopback binding never issues a GUI session from a forged loopback Host", () => {
+  test("a wildcard LAN binding automatically issues a local dashboard session", () => {
     const config = remoteConfig();
     const state = initializeManagementAuthState(config);
     const request = new Request("http://localhost:10100/", {
       headers: { Host: "localhost:10100" },
     });
-    expect(issueGuiSession(request, config, state)).toBeNull();
+    markPrivateNetworkRequest(request, "127.0.0.1");
+    expect(issueGuiSession(request, config, state)?.issuance).toBe("trusted-lan");
   });
 
   test("all local credential shapes are rejected by the upstream-forwarding guard", () => {

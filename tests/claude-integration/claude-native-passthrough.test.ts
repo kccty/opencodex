@@ -404,7 +404,9 @@ test.each([false, true])("Desktop mapping errors follow admission on both endpoi
           });
           const body = await response.json() as { type: string; error: { type: string; code?: string; message: string } };
           expect(body.type).toBe("error");
-          if (credential !== admissionSecret) {
+          // Data-plane authentication is disabled: no credential and the valid key both reach
+          // the mapping check, while a wrong dedicated key is still refused at admission.
+          if (credential === "wrong-admission-fixture") {
             expect(response.status).toBe(401);
             expect(body.error.type).toBe("authentication_error");
             expect(body.error.code).not.toBe("desktop_model_mapping_unavailable");

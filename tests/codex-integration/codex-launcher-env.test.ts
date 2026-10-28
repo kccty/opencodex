@@ -62,6 +62,34 @@ function canCreateDirectorySymlink(): boolean {
 }
 
 describe("Codex launcher native home and proxy environment", () => {
+  test("only automatic verified credentials add their bound Hub hostname to proxy bypass", () => fixture((_root, home) => {
+    const base = { CODEX_HOME: home, NO_PROXY: "prior.example.test", no_proxy: "legacy.example.test" };
+    for (const trusted of [true, false]) {
+      let reads = 0;
+      const env = buildCodexLaunchEnv(base, {
+        credentialDestination: (_home, _report, onTrustedHostname) => {
+          onTrustedHostname?.("192.168.50.83");
+          return trusted;
+        },
+        serviceToken: () => { reads++; return token; },
+      });
+      if (trusted) {
+        expect(env.NO_PROXY).toBe("127.0.0.1,::1,192.168.50.83,prior.example.test,legacy.example.test");
+        expect(env.no_proxy).toBe(env.NO_PROXY);
+        expect(env.OPENCODEX_API_AUTH_TOKEN).toBe(token);
+        expect(reads).toBe(1);
+      } else {
+        expect(env).toEqual(base);
+        expect(reads).toBe(0);
+      }
+    }
+    // Explicit exports do not authorize destination inspection or any new bypass entry.
+    const exported = { ...base, OPENCODEX_API_AUTH_TOKEN: token };
+    expect(buildCodexLaunchEnv(exported, {
+      credentialDestination: () => { throw new Error("must not inspect explicit credentials"); },
+      serviceToken: () => { throw new Error("must not read explicit credentials"); },
+    })).toEqual(exported);
+  }));
   (canCreateDirectorySymlink() ? codexLaunchOwnershipTest : test.skip)("a symlinked user .codex is the home config, not a project layer", () => fixture((root, home) => {
     const user = join(root, "user"), cwd = join(user, "project");
     mkdirSync(cwd);

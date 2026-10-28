@@ -33,9 +33,8 @@ function request(path = "/v1/responses", headers: Record<string, string> = {}): 
 }
 
 describe("loopback listener policy view", () => {
-  test("the public listener still demands a credential on a wildcard bind", () => {
-    // The whole point of the separate listener is that this does not change.
-    expect(resolveResponsesApiAuth(request(), wildcardConfig)).toBeNull();
+  test("the public listener admits credentialless calls as anonymous on a wildcard bind", () => {
+    expect(resolveResponsesApiAuth(request(), wildcardConfig)).toEqual({ kind: "anonymous", source: "anonymous" });
   });
 
   test("the loopback view admits without a credential and names it loopback", () => {

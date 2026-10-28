@@ -696,9 +696,10 @@ no manifest is left unchanged; use `ocx recover-history --legacy-openai --yes` o
 intend to force that legacy relabel. The command is intentionally broad: it rewrites every thread
 with a user message currently tagged `opencodex` to `openai`, normalizes `exec` to `cli`, and sets
 the event marker—including legitimate dedicated-provider history. Back up the state and use it only
-when that full scope is intended. Non-loopback dedicated-provider mode still mirrors history
-under the `opencodex` provider while active and restores the backed-up metadata on exit. Set
-`syncResumeHistory: false` to leave history untouched.
+when that full scope is intended. Provider-table mode (non-loopback, client compaction) now retains
+the marker-owned root `openai_base_url` beside the table, so threads already tagged `openai` keep
+reaching the proxy without being rewritten; authless Desktop omits that override. Set
+`syncResumeHistory: false` to leave the history job untouched.
 
 ## Model catalog sync
 
@@ -1402,7 +1403,7 @@ When returning to the root-override form, OpenCodex retains an existing `[model_
 
 `ocx restore`, `ocx stop` and `ocx uninstall` no longer refuse on `history_paginated_requires_native_writer`. They take every OpenCodex root routing key out and keep the `[model_providers.opencodex]` definition on disk, so conversations whose rows still name that provider keep resolving while plain `codex` stops pointing at the proxy. The result is reported as a partial restore that names the retained lines, and `ocx restore --remove-codex-provider-table` removes them too, after which those conversations stop opening.
 
-Enabling the integration in its provider-table form on a home whose `openai`-tagged conversations Codex has already paginated used to be refused outright with `history_paginated_openai_requires_native_writer`: nothing was written and the integration stayed disabled. OpenCodex now completes that transition by keeping the managed root `openai_base_url` override beside the `[model_providers.opencodex]` table. Codex merges the override onto its built-in `openai` provider, so those conversations keep reaching the proxy without being relabeled and no rollout byte or thread row is touched. Only a routing form that requires the `x-opencodex-api-key` admission header still refuses, because Codex's built-in provider cannot carry that header; its message names the two settings that resolve it — route Codex through the loopback listener so the override can be retained, or set `syncResumeHistory` to `false` to accept that those conversations resume against Codex's own OpenAI endpoint.
+Enabling the integration in its provider-table form on a home whose `openai`-tagged conversations Codex has already paginated used to be refused outright with `history_paginated_openai_requires_native_writer`: nothing was written and the integration stayed disabled. OpenCodex now completes that transition by keeping the managed root `openai_base_url` override beside the `[model_providers.opencodex]` table. Codex merges the override onto its built-in `openai` provider, so those conversations keep reaching the proxy without being relabeled and no rollout byte or thread row is touched. Data-plane authentication is disabled, so the admission-header form also retains that override; this refusal now applies only to an older hub or a deliberately restricted build, and `syncResumeHistory: false` still leaves the history job untouched.
 
 ### Remote thread-list provider filters
 

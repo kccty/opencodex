@@ -1,11 +1,13 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { OcxConfig } from "../types";
+import { isHubTransportPermitted as isPairingTransportPermitted } from "../lib/hub-transport";
 import { canonicalGuiBrowserOrigin, standaloneGuiPairingOrigin } from "../lib/gui-pair-capability";
 import { authorizationCredential } from "../lib/authorization-scheme";
 import {
   isAllowedManagementOrigin,
   isApiAuthRequired,
   isLoopbackHostname,
+  isTrustedLanRequest,
   managementRequestOrigin,
   parseHttpHost,
 } from "./auth-cors";
@@ -13,6 +15,7 @@ import {
 export type GuiSessionIssuance =
   | "loopback"
   | "remembered-admin"
+  | "trusted-lan"
   | "tailscale-identity"
   | "pairing";
 
@@ -58,7 +61,10 @@ export interface GuiSessionState {
 }
 
 export interface GuiSessionRequestContext {
+  /** Derived from the actual dedicated loopback management listener, never request headers. */
   trustedTailscaleIngress: boolean;
+  /** Kernel-reported connection peer; forwarded headers are never authority. */
+  peerAddress?: string | null;
   now?: number;
 }
 
@@ -182,6 +188,11 @@ export function issueGuiSession(
   const host = parseHttpHost(req.headers.get("Host"));
   if (!host) return null;
   const now = context.now ?? Date.now();
+
+  if (!context.trustedTailscaleIngress && isTrustedLanRequest(req, config)) {
+    const origin = new URL(req.url).origin;
+    return mintSession(origin, origin, "trusted-lan", state, now);
+  }
 
   if (!isApiAuthRequired(config)) {
     if (!isLoopbackHostname(host.hostname) || !isAllowedManagementOrigin(req, config)) return null;
@@ -338,10 +349,8 @@ export function consumeGuiPairingGrant(
   // caller could strip TLS termination and spend every code the operator prints. Refusing
   // here leaves the grant intact for a later request over a scheme that can carry it.
   //
-  // There is no opt-in for plaintext. An earlier revision allowed non-loopback HTTP when
-  // `remoteGui.allowInsecureHttp` was true; a reusable grant on plaintext HTTP is readable
-  // by anything on the path and the session it mints is reusable, so the flag recorded a
-  // risk the operator could not bound rather than controlling one.
+  // Literal RFC1918 IPv4 destinations also support deliberately unencrypted LAN pairing.
+  // This changes transport only; grant origin, expiry, replay and CSRF checks remain intact.
   const destination = managementRequestOrigin(req, config);
   if (!destination || !isPairingTransportPermitted(destination)) return null;
   const grant = strictPairingGrantBody(body);
@@ -392,23 +401,6 @@ export function consumeGuiPairingGrant(
   if (!isPairingTransportPermitted(record.serverOrigin)) return null;
   state.pairingGrants.delete(digest);
   return mintSession(record.serverOrigin, record.browserOrigin, "pairing", state, now, record.localPairing === true);
-}
-
-/**
- * A pairing grant may cross loopback or authenticated HTTPS, and nothing else.
- *
- * Loopback plaintext is admissible because the bytes never leave the machine. Non-loopback
- * plaintext is not, and no configuration re-opens it.
- */
-function isPairingTransportPermitted(origin: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(origin);
-  } catch {
-    return false;
-  }
-  if (url.protocol === "https:") return true;
-  return url.protocol === "http:" && isLoopbackHostname(url.hostname);
 }
 
 function requestCredential(req: Request): string | null {

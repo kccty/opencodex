@@ -22,8 +22,10 @@ bun run dev:gui
 
 ## 登入
 
+區域網路 IPv4 預設免登入，不需信任開關或 token。將 `hostname` 設為 `0.0.0.0`，關閉 `unauthenticatedLoopbackListener` 和 `hub.managementIngress`，即可透過同一連接埠存取 Web、管理 API 與模型介面；本機也能使用 `127.0.0.1`。重新整理會自動進入。能存取此區網位址的裝置都擁有管理權限，包括查看已儲存的資料金鑰。公網位址與網域名稱存取仍需認證。
+
 在預設的 loopback 綁定（`localhost` / `127.0.0.1`）上，儀表板永遠不會要求 token：代理會將短期
-GUI session 簽發到服務的頁面中，並在到期或代理重啟時靜默續期。只有綁定到非 loopback 主機名稱的
+GUI session 簽發到服務的頁面中，並在到期或代理重啟時靜默續期。公網位址或網域名稱上的
 儀表板才需要 admin token（`OPENCODEX_ADMIN_AUTH_TOKEN`，或自動產生的
 `~/.opencodex/admin-api-token` 檔案）。
 

@@ -99,6 +99,7 @@ import {
   isApiAuthRequired,
   isLoopbackHostname,
   markTrustedHubManagementRequest,
+  markPrivateNetworkRequest,
   jsonResponse,
   admissionFields,
   resolveApiAuth,
@@ -319,6 +320,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
       maxRequestBodySize: inboundBodyLimitBytes,
       async fetch(req: Request, requestServer: Server<WsData>): Promise<Response> {
       const ingress = ingressForServer(requestServer);
+      if (ingress === "public") markPrivateNetworkRequest(req, requestServer.requestIP(req)?.address ?? null);
       // Bind management-origin trust to the actual Bun listener object resolved above.
       // Neither Host nor any X-Forwarded-* header can manufacture this process-local mark.
       if (ingress === "hub-management" && config.runtimeRole === "hub") {
@@ -1881,6 +1883,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (req.method === "GET") {
           const session = issueGuiSession(req, config, managementAuth, {
             trustedTailscaleIngress: ingress === "hub-management",
+            peerAddress: requestServer.requestIP(req)?.address ?? null,
           });
           return session
             ? withManagementCors(serveSessionBootstrap(session), req, config)
@@ -1940,6 +1943,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
       const guiSessionCandidate = req.method === "GET" && (url.pathname === "/" || !url.pathname.includes("."))
         ? issueGuiSession(req, config, managementAuth, {
           trustedTailscaleIngress: ingress === "hub-management",
+          peerAddress: requestServer.requestIP(req)?.address ?? null,
         })
         : null;
       const guiFile = serveGuiFile(

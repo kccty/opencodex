@@ -9,7 +9,7 @@ export interface SelectedKeyTestDeps extends DataClientDeps {
 }
 interface ProbeReport {
   schemaVersion: 1;
-  control: { outcome: "not_run" | "credential_required" | "unavailable"; status?: number };
+  control: { outcome: "not_run" | "credential_required" | "admission_disabled" | "unavailable"; status?: number };
   request: { outcome: "not_run" | "succeeded" | "failed" | "unsupported_response"; status?: number };
   response?: SafeModelResponse;
 }
@@ -73,8 +73,20 @@ export async function handleSelectedKeyTest(argv: string[], deps: SelectedKeyTes
         const path = options.protocol === "responses" ? "/v1/responses" : options.protocol === "chat" ? "/v1/chat/completions" : "/v1/messages";
         report.control.outcome = "unavailable";
         const control = await requestJson(target, path, "{", undefined, deps, signal, report.control);
-        if (report.control.status !== 401 || !nativeRefusal(control, options.protocol)) throw new Error();
-        report.control.outcome = "credential_required";
+        if (report.control.status === 401) {
+          if (!nativeRefusal(control, options.protocol)) throw new Error();
+          report.control.outcome = "credential_required";
+        } else if (report.control.status === 400 || report.control.status === 403 || report.control.status === 422) {
+          // Data-plane authentication is disabled: the deliberately malformed control reached
+          // the handler instead of admission, so this probe cannot prove that the supplied key
+          // is authorized. It still sends the keyed request, which a wrong dedicated key is
+          // refused for, and reports the weaker fact instead of claiming a verified credential.
+          report.control.outcome = "admission_disabled";
+        } else {
+          // A 2xx or 5xx answer to the malformed control is not admission working normally;
+          // the surface is broken or misrouted and inference would only add noise.
+          throw new Error();
+        }
         const body = options.protocol === "responses"
           ? { model: options.model, input: "Reply with OK.", max_output_tokens: 16 }
           : { model: options.model, messages: [{ role: "user", content: "Reply with OK." }], max_tokens: 16,
@@ -88,7 +100,9 @@ export async function handleSelectedKeyTest(argv: string[], deps: SelectedKeyTes
       });
       signal.throwIfAborted();
       printData(report, options.json, [
-        "Credentialless request was refused; the model request using the supplied key succeeded.",
+        report.control.outcome === "admission_disabled"
+          ? "This proxy admits credentialless requests (data-plane authentication is disabled); the supplied key was not verified."
+          : "Credentialless request was refused; the model request using the supplied key succeeded.",
         ...(report.response?.completion === "limited" ? ["Completion was limited by the model response."] : []),
         ...report.response!.text,
       ]);

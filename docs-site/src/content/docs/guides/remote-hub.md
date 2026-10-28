@@ -1,12 +1,40 @@
 ---
 title: Remote Hub Deployment
-description: Run a one-port opencodex hub on Linux, macOS, or Docker with a loopback companion listener, a self-provisioned data token, ocx hub invite, a loopback-only management ingress, Tailscale Serve, and headless OAuth.
+description: Run an opencodex hub on a private LAN with one port, or use the optional authenticated remote deployment.
 ---
 
 For SSH machine links, see [Remote Link](/guides/remote-link/).
 
-An opencodex hub keeps provider credentials and usage state on one host while authenticated clients
-use its data plane remotely. The browser-facing management plane is separate: an optional listener
+## Direct private LAN HTTP
+
+`ocx connect` and `ocx hub invite` support explicit RFC1918 IPv4 HTTP origins, such as
+`http://192.168.50.83:10100`. The same allowance covers pairing, authenticated catalog/usage
+reads and client-key lifecycle. Public HTTP addresses and DNS hostnames still require HTTPS.
+Redirects remain refused. Private IPv4 dashboard and management requests require no token.
+
+For a single LAN listener, configure:
+
+```json
+{
+  "runtimeRole": "hub",
+  "hostname": "0.0.0.0",
+  "port": 10100,
+  "unauthenticatedLoopbackListener": { "enabled": false },
+  "hub": { "managementIngress": { "enabled": false } }
+}
+```
+
+Merge these fields into the existing configuration. Open `http://<LAN IPv4>:10100` for Web
+and management; clients use `http://<LAN IPv4>:10100/v1`. Local access uses
+`http://127.0.0.1:10100`. No separate management port, pairing or dashboard login is needed
+for direct LAN access. Existing enrolled clients can continue using their saved keys.
+
+HTTP exposes credentials and request content to observers on the network path. Use it only
+on a trusted LAN. HTTPS or SSH remains the encrypted option. The dedicated management
+ingress remains loopback-only; direct LAN HTTP uses the public listener.
+
+An opencodex hub keeps provider credentials and usage state on one host. The primary listener
+serves both management and inference. For authenticated remote deployments, an optional listener
 binds only `127.0.0.1`, serves the dashboard and `/api/*`, and is intended to sit behind Tailscale
 Serve or another operator-owned HTTPS frontend.
 
@@ -20,6 +48,14 @@ Remote Workspace admits only its paired bearer-authenticated agent WebSocket and
 exchange; see [Remote Workspace](/guides/remote-workspace/). Do not publish its
 port directly, do not add a cloud-firewall rule for it, and do not use Tailscale Funnel. Funnel is a
 public-internet surface and is outside this deployment model.
+
+:::warning[Data-plane authentication is disabled in this build]
+`/v1/*` admits a caller that presents no credential as anonymous, from any host that can reach the
+listener. The data token, per-client keys and pairing still exist, and a presented key still names
+its principal for usage attribution, but none of them is required. Keep the data listener on a
+trusted network, or put an access-controlled TLS frontend in front of it. Private IPv4 management
+also allows credentialless access; public-address and DNS-hostname management remains authenticated.
+:::
 
 With management ingress enabled, the local dashboard command opens `http://127.0.0.1:<management port>` so the address matches the IPv4-only listener without resolving `localhost`.
 
@@ -463,7 +499,7 @@ be running on that port before it runs the line — otherwise the hub refuses th
 code is spent. The note says which port, and offers admitting the default origin instead.
 
 `invite` refuses *before* minting anything when the setup cannot work — a `runtimeRole` that is not
-`hub`, a missing `hub.managementPublicOrigin`, a plaintext non-loopback management origin, a
+`hub`, a missing `hub.managementPublicOrigin`, a plaintext management origin outside loopback or RFC1918 IPv4, a
 malformed `--data-url`, a data origin that would be this machine's own loopback, or no running
 attested proxy. One precondition deserves its own paragraph.
 
@@ -790,9 +826,9 @@ For a service rollback, stop the branch service and repair the prior release aga
   `service-api-token` file holds the management token, so the hub fences its management API closed.
   Delete the file and run `ocx service repair` to provision a data-plane token. Unsetting the
   environment variable does not help here — the file is the source.
-- **Plain HTTP refused:** pairing over non-loopback HTTP is refused outright, and there is no flag
-  that opts out of it. Put the management origin behind HTTPS, or pair over loopback. Admin tokens
-  are never sent over HTTP.
+- **Plain HTTP refused:** only loopback and literal RFC1918 IPv4 HTTP origins are accepted.
+  Public addresses and DNS hostnames require HTTPS. Private LAN HTTP can carry pairing and admin
+  credentials without encryption; use it only on a trusted network.
 - **`403 origin_rejected` from `/v1/catalog` while `/readyz` returns `200`:** the data listener is
   bound to loopback behind a TLS frontend. See [Giving the data listener TLS](#giving-the-data-listener-tls).
 - **Remote session ended:** sign in or pair again. Logout and expiry invalidate only the browser
@@ -805,7 +841,7 @@ For a service rollback, stop the branch service and repair the prior release aga
 
 The read-only data-plane endpoint is `GET /v1/usage`, using `x-opencodex-api-key` with a configured client key. Environment-wide and admin keys are refused. It accepts `range`, `surface`, `provider`, `model`, `since`, and `until`; unknown/repeated options and caller-selected key IDs are rejected. Oversized skipped rows retain the explicit incomplete-history warning.
 
-Client usage credentials are sent only over HTTPS or loopback HTTP. Both the request and response disable caching.
+Client usage credentials are sent over HTTPS, loopback HTTP or explicit private IPv4 HTTP. LAN HTTP is unencrypted. Both the request and response disable caching.
 
 ### Pairing this browser with a hub
 

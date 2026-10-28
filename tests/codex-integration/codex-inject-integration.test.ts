@@ -1926,7 +1926,7 @@ describe("injectCodexConfig integration (Design B)", () => {
     expect(config).not.toContain("requires_openai_auth = false");
   });
 
-  test("non-loopback hostname still uses the legacy provider-table injection", () => {
+  test("non-loopback hostname injects the provider table and retains the root openai_base_url", () => {
     writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.5"\n', "utf8");
 
     const r = runInject(codexHome, ocxHome, JSON.stringify({ hostname: "192.168.1.20" }));
@@ -1937,7 +1937,9 @@ describe("injectCodexConfig integration (Design B)", () => {
     expect(config).toContain('model_provider = "opencodex"');
     expect(config).toContain("[model_providers.opencodex]");
     expect(config).toContain('base_url = "http://192.168.1.20:10100/v1"');
-    expect(config).not.toContain("openai_base_url");
+    // Threads already tagged `openai` resolve through Codex's built-in provider; the retained
+    // root override is what keeps them on this proxy instead of api.openai.com.
+    expect(config).toContain('openai_base_url = "http://192.168.1.20:10100/v1"');
   });
 
   test("CRLF config (Windows-edited) stays uniformly CRLF after injection", () => {

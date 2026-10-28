@@ -2717,23 +2717,23 @@ test("CCA rejects invalid base64 and non-image bytes instead of returning b64_js
   }
 });
 
-test("GET /v1/opencodex/artifacts/:id serves opaque artifacts with API auth", async () => {
+test("GET /v1/opencodex/artifacts/:id serves opaque artifacts without a required credential", async () => {
   process.env.OPENCODEX_API_AUTH_TOKEN = "proxy-admission-secret";
   const { materializeInlineImage, createImageBudget, artifactHttpUrl } = await import("../../src/images/artifacts");
   const filePath = await materializeInlineImage(CCA_TINY_PNG, createImageBudget());
   const urlPath = artifactHttpUrl(filePath);
-
-  // Non-loopback bind makes data-plane auth mandatory (same as production remote binds).
   saveConfig({ ...ccaConfig(), hostname: "0.0.0.0" });
   const server = startServer(0);
   try {
     const denied = await fetch(`http://127.0.0.1:${server.port}${urlPath}`);
-    expect(denied.status).toBe(401);
+    expect(denied.status).toBe(200);
+    await denied.body?.cancel();
 
     const wrong = await fetch(`http://127.0.0.1:${server.port}${urlPath}`, {
       headers: { authorization: "Bearer wrong-secret" },
     });
-    expect(wrong.status).toBe(401);
+    expect(wrong.status).toBe(200);
+    await wrong.body?.cancel();
 
     const ok = await fetch(`http://127.0.0.1:${server.port}${urlPath}`, {
       headers: { authorization: "Bearer proxy-admission-secret" },

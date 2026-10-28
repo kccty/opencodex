@@ -1,5 +1,7 @@
 # Remote hub: roles, sessions, and disconnection
 
+Literal RFC1918 IPv4 Hub origins also accept unencrypted HTTP for connection, pairing and subsequent client reads. Public HTTP hostnames/addresses remain refused; authentication, exact origins, CSRF and single-use grants still apply. Use this exception only on a trusted LAN: network-path observers can read credentials and request content.
+
 The remote hub lets one machine hold the models and credentials while other machines
 and browsers use them. Four questions come up constantly, and three of them have
 answers that are easy to guess wrong.
@@ -153,15 +155,16 @@ delete the file and run `ocx service repair` — **not** to unset anything.
 when it cannot be trusted by position or identity. Configuring the hub itself — providers,
 accounts, routing, keys — never requires a pairing code.
 
-`GET /opencodex-session` mints a session on its own in two cases (`src/server/gui-session.ts`):
+`GET /opencodex-session` automatically mints sessions in these cases (`src/server/gui-session.ts`):
 
 | Situation | What happens |
 |---|---|
 | API auth not required, request is loopback, origin allowed | Session minted, source `loopback`. This is the ordinary local dashboard. |
+| Primary private/wildcard bind, literal private IPv4 or loopback Host and same browser origin | Session minted automatically, source `trusted-lan`. Direct management API calls also need no token; no trust switch or separate management port is required. |
 | Role is `hub`, request arrived through the trusted Tailscale ingress over HTTPS, the login is in `remoteGui.allowedTailscaleUsers`, and the browser origin is allowed | Session minted, source `tailscale-identity`. No pairing code involved. |
 | Anything else | `null` — the browser gets 401 and must exchange a pairing grant at `POST /opencodex-session`. |
 
-So a pairing code is the fallback for the third row only. If the operator is sitting at
+So a pairing code is the fallback for the last row only. If the operator is sitting at
 the hub, or their Tailscale identity is on the allow-list, there is nothing to pair.
 
 The management API has its own admission ladder, independent of the browser session
@@ -278,8 +281,8 @@ attested local route `ocx gui pair` uses, authorized by the running proxy's own 
 secret. It requires a running hub.
 
 It refuses **before** minting anything when the setup cannot work: `runtimeRole` is not
-`hub`, `hub.managementPublicOrigin` is missing, the management origin is non-loopback
-plaintext, `--data-url` is malformed, there is no running attested proxy, or — the
+`hub`, `hub.managementPublicOrigin` is missing, the management origin is plaintext outside loopback/private IPv4,
+`--data-url` is malformed, there is no running attested proxy, or — the
 non-obvious one — the hub admits no loopback browser origin.
 
 Two of those are the refusals you will actually hit. The data-origin one names which shape

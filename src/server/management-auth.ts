@@ -62,6 +62,7 @@ import { forgetEphemeralSecretPath, forgetHardenedSecretPath, hardenSecretDir, h
 import type { OcxConfig } from "../types";
 import {
   isDataPlaneAdmissionSecret,
+  isTrustedLanRequest,
 } from "./auth-cors";
 import {
   authorizeGuiSessionRequest,
@@ -306,6 +307,7 @@ export function createManagementSessionControl(state: ManagementAuthState): Mana
     rememberDevice(req, config) { return state.available ? rememberGuiDevice(req, config, state) : null; },
     forgetDevice(req, config) { return state.available ? forgetGuiDevice(req, config, state) : null; },
     isCurrent(req: Request, config: OcxConfig): boolean {
+      if (isTrustedLanRequest(req, config)) return true;
       if (!state.available) return false;
       const credential = requestManagementCredential(req);
       if (!credential) return false;
@@ -316,6 +318,7 @@ export function createManagementSessionControl(state: ManagementAuthState): Mana
       return currentSession(req, config)?.issuance === "pairing";
     },
     canRevealDataKeys(req: Request, config: OcxConfig): boolean {
+      if (isTrustedLanRequest(req, config)) return true;
       const issuance = currentSession(req, config)?.issuance;
       return issuance === "pairing" || issuance === "tailscale-identity";
     },
@@ -345,6 +348,7 @@ export function createManagementSessionControl(state: ManagementAuthState): Mana
  */
 export type ManagementPrincipal =
   | "admin-token"
+  | "trusted-lan"
   | "opencode-catalog-token"
   | "gui-session"
   | "gui-pair-capability"
@@ -592,6 +596,7 @@ function resolveManagementAdmission(
       if (admission.ok && rememberedGuiSessionIsCurrent(req, config, state, admission.session, "logout")) principal = "gui-session";
     }
   }
+  if (!principal && config && isTrustedLanRequest(req, config)) principal = "trusted-lan";
   if (principal) admittedManagementRequests.set(req, principal);
   return principal;
 }

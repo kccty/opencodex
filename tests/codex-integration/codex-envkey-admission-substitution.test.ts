@@ -230,16 +230,17 @@ describe("#1686 env_key bearer admission reaches Direct with substitution", () =
     }
   });
 
-  test("a foreign bearer is still Codex Direct passthrough, not admission", async () => {
+  test("a foreign bearer is admitted as anonymous Codex Direct passthrough", async () => {
     saveConfig(directConfig());
     writeStoredMain(liveJwt());
 
     const server = await startSettledFixtureServer();
     try {
-      // A real ChatGPT credential is NOT one of our secrets, so it must not be admitted as one.
+      // A caller-owned ChatGPT credential is not one of our secrets: it is admitted anonymously
+      // and forwarded as the caller's own upstream credential, never substituted for ours.
       const response = await postResponses(server.url, "Bearer sk-user-chatgpt-token");
-      expect(response.status).toBe(401);
-      expect(upstreamAuth).toHaveLength(0);
+      expect(response.status).toBe(200);
+      expect(upstreamAuth).toEqual(["Bearer sk-user-chatgpt-token"]);
     } finally {
       await server.stop(true);
     }

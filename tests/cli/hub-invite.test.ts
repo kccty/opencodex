@@ -101,11 +101,12 @@ describe("hub invite argument and origin helpers", () => {
     expect(parseInviteClients("")).toBeNull();
   });
 
-  test("the transport rule matches the hub's: loopback or HTTPS, nothing else", () => {
+  test("the transport rule matches the hub's: loopback, private LAN IPv4 or HTTPS", () => {
     expect(pairingOriginUsable("https://hub.tailnet.ts.net")).toBe(true);
     expect(pairingOriginUsable("http://127.0.0.1:10101")).toBe(true);
     expect(pairingOriginUsable("http://localhost:10101")).toBe(true);
     expect(pairingOriginUsable("http://100.64.0.10:10101")).toBe(false);
+    expect(pairingOriginUsable("http://192.168.50.83:10100")).toBe(true);
   });
 
   test("the derived data origin is the bind address, with loopback spelled as localhost", () => {
@@ -283,7 +284,7 @@ describe("hub invite refuses before burning a code", () => {
     expect(matching.code).toBe(0);
   });
 
-  test("a non-loopback plaintext management origin cannot carry a code", async () => {
+  test("a non-private non-loopback plaintext management origin cannot carry a code", async () => {
     const { code, err } = await invite(["invite"], hubConfig({
       hub: { managementPublicOrigin: "http://100.64.0.10:10101" },
     }));

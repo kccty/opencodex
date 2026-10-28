@@ -40,6 +40,7 @@ import {
   safeConfigDTO,
   startServer,
 } from "../../src/server";
+import { resolveResponsesApiAuth } from "../../src/server/auth-cors";
 import { clearRequestLogsForTests, getRequestLogEntries } from "../../src/server/request-log";
 import { setRelayPlatformForTests } from "../../src/server/responses/passthrough-delivery";
 import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
@@ -274,7 +275,7 @@ describe("Responses request identity handoff", () => {
     }
   }, { timeout: SERVER_BUDGET_MS });
 
-  test("does not issue a request id before authentication and origin admission", async () => {
+  test("does not issue a request id before origin admission", async () => {
     if (existsSync(TEST_DIR)) removeTreeWithRetry(TEST_DIR);
     mkdirSync(TEST_DIR, { recursive: true });
     process.env.OPENCODEX_HOME = TEST_DIR;
@@ -286,19 +287,12 @@ describe("Responses request identity handoff", () => {
     const url = `http://127.0.0.1:${server.port}/v1/responses`;
     const body = JSON.stringify({ model: "gpt-test", input: "hello" });
     try {
-      const missingAuth = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
-      });
-      expect(missingAuth.status).toBe(401);
-      expect(missingAuth.headers.get("x-opencodex-request-id")).toBeNull();
-
+      // Data-plane authentication is disabled, so the hostile Origin is the rejection under
+      // test; a credentialless request now reaches the handler.
       const rejectedOrigin = await fetch(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-opencodex-api-key": "local-secret",
           origin: "https://attacker.test",
         },
         body,
@@ -546,26 +540,38 @@ describe("server local API auth", () => {
     expect(isApiAuthRequired(config("127.0.0.1"))).toBe(false);
   });
 
-  test("non-loopback binding requires env token before startup", () => {
+  test("non-loopback binding needs no env token before startup", () => {
     delete process.env.OPENCODEX_API_AUTH_TOKEN;
     expect(isApiAuthRequired(config("0.0.0.0"))).toBe(true);
-    expect(() => assertServerAuthConfig(config("0.0.0.0"))).toThrow("OPENCODEX_API_AUTH_TOKEN");
+    expect(() => assertServerAuthConfig(config("0.0.0.0"))).not.toThrow();
 
     process.env.OPENCODEX_API_AUTH_TOKEN = "local-secret";
     expect(() => assertServerAuthConfig(config("0.0.0.0"))).not.toThrow();
   });
 
-  test("auth header must match env token when non-loopback auth is required", () => {
+  test("a missing credential is admitted anonymously, but our own key shape must resolve", () => {
     process.env.OPENCODEX_API_AUTH_TOKEN = "local-secret";
     const cfg = config("0.0.0.0");
 
-    expect(hasValidApiAuth(new Request("http://localhost/api/config"), cfg)).toBe(false);
+    expect(hasValidApiAuth(new Request("http://localhost/api/config"), cfg)).toBe(true);
     expect(hasValidApiAuth(new Request("http://localhost/api/config", {
       headers: { "x-opencodex-api-key": "wrong" },
     }), cfg)).toBe(false);
     expect(hasValidApiAuth(new Request("http://localhost/api/config", {
       headers: { "x-opencodex-api-key": "local-secret" },
     }), cfg)).toBe(true);
+  });
+
+  test("a caller-owned bearer is admitted anonymously while our own key shape is refused", () => {
+    process.env.OPENCODEX_API_AUTH_TOKEN = "local-secret";
+    const cfg = config("0.0.0.0");
+    const post = (headers: Record<string, string>) => new Request("http://localhost/v1/responses", { method: "POST", headers });
+
+    expect(resolveResponsesApiAuth(post({}), cfg)).toEqual({ kind: "anonymous", source: "anonymous" });
+    expect(resolveResponsesApiAuth(post({ authorization: "Bearer fixture-caller-token" }), cfg))
+      .toEqual({ kind: "anonymous", source: "anonymous" });
+    expect(resolveResponsesApiAuth(post({ "x-opencodex-api-key": "ocx_data_revoked" }), cfg)).toBeNull();
+    expect(resolveResponsesApiAuth(post({ authorization: "Bearer ocx_admin_revoked" }), cfg)).toBeNull();
   });
 
   test("loopback remains allowed even when env token exists", () => {
@@ -798,7 +804,7 @@ describe("server local API auth", () => {
     expect(resolveGuiFilePath(root, "/%00")).toBeNull();
   });
 
-  test("/v1/models requires API auth and local Origin on non-loopback bindings", async () => {
+  test("/v1/models admits a credentialless request and still enforces Origin on non-loopback bindings", async () => {
     if (existsSync(TEST_DIR)) removeTreeWithRetry(TEST_DIR);
     mkdirSync(TEST_DIR, { recursive: true });
     process.env.OPENCODEX_HOME = TEST_DIR;
@@ -820,7 +826,7 @@ describe("server local API auth", () => {
     const modelsUrl = `http://127.0.0.1:${server.port}/v1/models`;
     try {
       const missingAuth = await fetch(modelsUrl);
-      expect(missingAuth.status).toBe(401);
+      expect(missingAuth.status).toBe(200);
 
       const badOrigin = await fetch(modelsUrl, {
         headers: { "x-opencodex-api-key": "local-secret", origin: "https://attacker.test" },
@@ -882,7 +888,7 @@ describe("server local API auth", () => {
     }
   });
 
-  test("/api/system/memory stays gated while /healthz exposes only bounded capability metadata (#314 WP3)", async () => {
+  test("LAN /api/system/memory needs no token while /healthz exposes bounded metadata (#314 WP3)", async () => {
     if (existsSync(TEST_DIR)) removeTreeWithRetry(TEST_DIR);
     mkdirSync(TEST_DIR, { recursive: true });
     process.env.OPENCODEX_HOME = TEST_DIR;
@@ -895,7 +901,8 @@ describe("server local API auth", () => {
     const server = startServer(0);
     try {
       const missing = await fetch(`http://127.0.0.1:${server.port}/api/system/memory`);
-      expect(missing.status).toBe(401);
+      expect(missing.status).toBe(200);
+      await missing.text();
 
       const ok = await fetch(`http://127.0.0.1:${server.port}/api/system/memory`, {
         headers: managementHeaders(),
@@ -4217,7 +4224,7 @@ describe("GET /v1/catalog remote data plane", () => {
     }
   });
 
-  test("admission accepts configured dedicated and bearer keys, and rejects every foreign class", async () => {
+  test("admission resolves configured keys and admits foreign credentials anonymously", async () => {
     saveConfig(remoteCatalogConfig());
     writeRemoteCatalog();
     const server = startServer(0);
@@ -4232,10 +4239,10 @@ describe("GET /v1/catalog remote data plane", () => {
         // perfectly valid data credential. The narrowing was a behavior regression against
         // shipped code, not a hardening.
         [{ "x-api-key": REMOTE_DATA_KEY }, 200, "remote-key"],
-        [{ authorization: "Bearer foreign-key" }, 401, null],
+        [{ authorization: "Bearer foreign-key" }, 200, null],
         [{ authorization: `Bearer ${configuredAdminToken() ?? "missing-admin"}` }, 401, null],
         [{ "x-opencodex-api-key": REMOTE_DATA_KEY, origin: "https://attacker.test" }, 403, null],
-        [{}, 401, null],
+        [{}, 200, null],
       ] as const;
       for (const [headers, status, keyId] of cases) {
         const response = await fetch(new URL("/v1/catalog", server.url), { headers });

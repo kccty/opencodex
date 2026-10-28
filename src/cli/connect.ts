@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { DEFAULT_CATALOG_PATH } from "../codex/paths";
 import { codexSupportedReasoningEfforts } from "../codex/catalog/effort";
+import { isPrivateLanHttpOrigin } from "../lib/hub-transport";
 import { resolveCodexRuntime } from "../codex/runtime";
 import {
   inspectClientCatalogReadiness,
@@ -387,6 +388,7 @@ async function runHubConnect(argv: string[], deps: ClientCommandDeps): Promise<v
   const serverUrl = args.shift();
   if (!serverUrl || serverUrl.startsWith("--")) throw new CliUsageError("hub URL is required", CONNECT_USAGE);
   const managementUrl = takeOption(args, "--management-url");
+  if ([serverUrl, managementUrl].some(url => url && isPrivateLanHttpOrigin(url))) console.error("Warning: private LAN HTTP is unencrypted; network peers may read credentials and request content. Use only a trusted LAN.");
   const clients = parseClients(takeOption(args, "--clients"));
   const catalogTimeoutSeconds = takeIntegerOption(args, "--catalog-timeout", { min: 1 });
   if (catalogTimeoutSeconds !== undefined && catalogTimeoutSeconds > 120) {

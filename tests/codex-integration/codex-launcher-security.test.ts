@@ -8,7 +8,7 @@ import { resolveCodexLaunchCommand } from "../../src/cli/codex-launcher";
 import { commandInvocation } from "../../src/lib/win-exec";
 import { classifyCodexRouting } from "../../src/codex/inject/routing-classify";
 import { buildProviderTableBlockForTarget } from "../../src/codex/inject/config-toml";
-import { standaloneCodexRoutingTarget } from "../../src/codex/inject/routing-target";
+import { standaloneCodexRoutingTarget, validateCodexRoutingTarget } from "../../src/codex/inject/routing-target";
 import { buildWindowsCodexShim, WINDOWS_SHIM_REVISION_MARKER } from "../../src/codex/shim-templates";
 import { repoPath, repoRoot } from "../helpers/repo-root";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
@@ -73,6 +73,54 @@ describe("codex launcher credential destination", () => {
       process.chdir(parse(home).root);
       expect(buildCodexLaunchEnv({ CODEX_HOME: codexHome }, { routingKind: "opencodex-local" }).OPENCODEX_API_AUTH_TOKEN).toBe(fixtureToken);
     } finally { process.chdir(originalDirectory); }
+  }));
+  for (const serverUrl of ["http://192.168.50.83:10100", "https://hub.example.test"]) {
+    codexLaunchOwnershipTest(`loads the service token only for the persisted connected Hub ${serverUrl}`, () => fixture((_home, codexHome, ocxHome) => {
+      const client = {
+        serverUrl, managementUrl: serverUrl, managementTransport: "direct", selectedClients: ["codex"],
+        tokenEnv: "OPENCODEX_API_AUTH_TOKEN", apiKeyId: "fixture-client", tokenFingerprint: "a".repeat(64),
+        protocolVersion: 1, connectedAt: "2026-10-28T00:00:00.000Z",
+      };
+      writeFileSync(join(ocxHome, "config.json"), JSON.stringify({ ...installation, runtimeRole: "client", client }));
+      const target = validateCodexRoutingTarget({ baseUrl: `${serverUrl}/v1`, requiresAdmissionToken: true, tokenEnv: "OPENCODEX_API_AUTH_TOKEN" });
+      const managed = 'model_provider = "opencodex"\n' + buildProviderTableBlockForTarget(target);
+      writeFileSync(join(codexHome, "config.toml"), managed);
+      let reads = 0;
+      const launch = () => buildCodexLaunchEnv({ CODEX_HOME: codexHome }, {
+        routingKind: "opencodex-local", serviceToken: () => { reads++; return fixtureToken; },
+      });
+      const loaded = launch();
+      expect(loaded.OPENCODEX_API_AUTH_TOKEN).toBe(fixtureToken);
+      expect(loaded.NO_PROXY?.split(",")).toContain(new URL(serverUrl).hostname);
+      expect(loaded.no_proxy).toBe(loaded.NO_PROXY);
+      expect(reads).toBe(1);
+      // A reserved provider name never permits a destination differing from the saved Hub.
+      writeFileSync(join(codexHome, "config.toml"), managed.replace(`${serverUrl}/v1`, "http://192.168.50.84:10100/v1"));
+      expect(launch().OPENCODEX_API_AUTH_TOKEN).toBeUndefined();
+      expect(reads).toBe(1);
+      writeFileSync(join(codexHome, "config.toml"), managed);
+      // A connection record without its client role cannot authorize remote credentials.
+      writeFileSync(join(ocxHome, "config.json"), JSON.stringify({ ...installation, client }));
+      expect(launch().OPENCODEX_API_AUTH_TOKEN).toBeUndefined();
+      expect(reads).toBe(1);
+    }));
+  }
+  codexLaunchOwnershipTest("a persisted connected Hub cannot authorize public HTTP", () => fixture((_home, codexHome, ocxHome) => {
+    const serverUrl = "http://203.0.113.83:10100";
+    const client = {
+      serverUrl, managementUrl: serverUrl, managementTransport: "direct", selectedClients: ["codex"],
+      tokenEnv: "OPENCODEX_API_AUTH_TOKEN", apiKeyId: "fixture-client", tokenFingerprint: "a".repeat(64),
+      protocolVersion: 1, connectedAt: "2026-10-28T00:00:00.000Z",
+    };
+    writeFileSync(join(ocxHome, "config.json"), JSON.stringify({ ...installation, runtimeRole: "client", client }));
+    writeFileSync(join(codexHome, "config.toml"), 'model_provider = "opencodex"\n' + buildProviderTableBlockForTarget({
+      baseUrl: `${serverUrl}/v1`, requiresAdmissionToken: true, tokenEnv: "OPENCODEX_API_AUTH_TOKEN",
+    }));
+    let reads = 0;
+    expect(buildCodexLaunchEnv({ CODEX_HOME: codexHome }, {
+      routingKind: "opencodex-local", serviceToken: () => { reads++; return fixtureToken; },
+    }).OPENCODEX_API_AUTH_TOKEN).toBeUndefined();
+    expect(reads).toBe(0);
   }));
   test("directory and remote overrides never read a service token", () => fixture((_home, codexHome) => {
     writeFileSync(join(codexHome, "config.toml"), local);

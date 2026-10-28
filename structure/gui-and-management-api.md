@@ -168,13 +168,16 @@ transport so environment HTTP proxies cannot observe or fabricate the exchange.
 
 > Decision record: [ADR-0073](decisions/ADR-0073-authentication-boundaries.md)
 
-Management authentication never has a loopback bypass. If no management credential is available, or
+On the primary private-LAN listener, `isTrustedLanRequest` in `src/server/auth-cors.ts` admits
+literal private IPv4 and loopback Host/origins on private or wildcard binds without credentials when the kernel peer is private or loopback. The public fetch handler records that fact once; forwarded headers cannot provide it.
+Browser sessions bootstrap automatically; other callers receive the `trusted-lan` principal.
+Dedicated management ingress and public/DNS destinations retain credential authentication. If no management credential is available, or
 management token creation, validation, or permission hardening fails, `/api/*` requests without a
-valid scoped capability return 503 while `/v1/*` and unauthenticated `/healthz` continue to operate.
+valid scoped capability or LAN admission return 503 while `/v1/*` and unauthenticated `/healthz` continue to operate.
 Windows ACL hardening results must be checked explicitly because an `icacls` timeout is a soft failure in the shared secret helper.
 
-Local dashboard page entry requires a loopback binding, a valid parseable loopback `Host`, and an
-exact request origin. A hub may additionally enable `hub.managementIngress`, a second management
+Loopback-only dashboard entry requires a parseable loopback `Host` and exact request origin.
+Private-LAN dashboard entry uses the same primary listener as inference. A hub may additionally enable `hub.managementIngress`, a second management
 surface bound exactly to `127.0.0.1` for a local Tailscale Serve or operator TLS frontend. That
 listener serves only packaged GUI/SPA routes, `GET`/`POST /opencodex-session`, and `/api/*`; all data,
 health, readiness, WebSocket, and unknown-static routes receive a JSON 404 before dispatch.
@@ -185,10 +188,10 @@ the unauthenticated data-loopback listener always pass `trustedTailscaleIngress:
 of `Host`, `Origin`, `Forwarded`, `X-Forwarded-*`, or `Tailscale-User-*` values. A generic TLS proxy
 cannot establish a Tailscale identity and uses the existing single-use, digest-only, origin-bound
 pairing exchange. Hub pairing through `hub.managementIngress` trusts its actual `requestServer` and ignores forwarded headers. Loopback `Host` retains the observed local origin for `ocx gui` and local CLI management; non-loopback `Host` must match HTTPS `hub.managementPublicOrigin`.
-That canonical origin governs non-loopback management CORS, session admission and CSRF on the marked management listener. Only that listener's requests carry the mark, and the data-loopback and link listeners never resolve it. The public listener keeps its existing hub behavior: with authentication on, it can still redeem a pairing grant that arrives with the canonical public Host and Origin, as before this change. With authentication off, it rejects that path. Standalone and loopback rules are unchanged, and grants remain single-use and origin-bound.
+That canonical origin governs non-loopback management CORS, session admission and CSRF on the marked management listener. Only that listener's requests carry the mark, and the data-loopback and link listeners never resolve it. The public listener keeps authenticated, origin-bound pairing; `src/server/gui-session.ts` shares the explicit RFC1918 IPv4 HTTP allowance in `src/lib/hub-transport.ts` with the client. This LAN transport is unencrypted; public HTTP is refused. With authentication off, the public listener rejects pairing. Standalone and loopback rules are unchanged, and grants remain single-use and origin-bound.
 
 The server issues a local in-memory session for five minutes or a remote session for twelve hours,
-with 128 live sessions maximum. Stored-key reads require a current pairing or trusted Tailscale-identity session, not automatic loopback issuance or admin tokens. `POST /api/keys/reveal` uses `createManagementSessionControl().canRevealDataKeys` before and after body reception; absent controls deny. Every session is bound to the exact server and browser origins;
+with 128 live sessions maximum. Stored-key reads allow primary LAN admission or a current pairing or trusted Tailscale-identity session. Automatic loopback-only issuance and admin tokens do not suffice. `POST /api/keys/reveal` uses `createManagementSessionControl().canRevealDataKeys` before and after body reception; absent controls deny. Every session is bound to the exact server and browser origins;
 state-changing requests additionally require the session CSRF token. A raw admin token remains
 ordinary management authority only and cannot satisfy consent routes. The dashboard never attaches
 its management session to `/v1/*` requests. Only `POST /api/session/logout` tolerates remembered-device User-Agent drift after session-token, Origin, CSRF, cookie, server-origin and current admin-credential checks; ordinary access, currentness and resumption retain the User-Agent binding (`tests/server/persistent-dashboard-admission.test.ts`). Pages containing a session bootstrap are served with
@@ -569,6 +572,7 @@ Pairing-grant source limiting applies only to invalid guesses from an allowed br
 
 ## Durable provider PATCH
 Provider editor snapshots and management writes validate provider-wide `inputModalities` through `providerManagementConfigError` in `src/server/auth-cors.ts`, sharing the [config modality contract](config.md#explicit-per-model-capability-declarations). Malformed declarations are refused before persistence or catalog refresh; the field remains editor-owned rather than a credential or derived DTO field. `PUT /api/combos` shares this transaction for combo changes, rename references, disabled selectors and request-only Vision Sidecar enrollment; see `tests/routing/combo-vision-enrollment.test.ts`.
+Private IPv4 management is enabled by default on private/wildcard binds; there is no `trustedLanDashboard` switch. `src/server/gui-session.ts` uses the shared LAN predicate to mint `trusted-lan` sessions on the primary port. Same-origin browser checks remain; direct LAN API callers need no credential. Raw LAN admission never becomes human consent for session-only operations.
 
 `src/server/management/provider-routes.ts` commits every provider PATCH variant through
 `src/server/management/provider-patch-transaction.ts`, including standalone default-provider

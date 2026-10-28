@@ -101,7 +101,8 @@ local credential error, and it does not apply when the caller selected an explic
 provider, because a configured pool owns its own authentication failure rather than hiding it behind
 separately billed generation.
 
-On non-loopback binds, data-plane authentication and origin policy cover both Images routes. An
+On non-loopback binds, origin policy still covers both Images routes; data-plane authentication is
+disabled, so a credentialless caller is admitted as anonymous. An
 explicit keyed Images provider accepts the proxy admission secret as either an OpenAI-style bearer
 or `x-opencodex-api-key` because the provider key replaces caller authorization before fetch. The
 ChatGPT Direct path still requires the dedicated header so its caller-owned upstream bearer remains

@@ -158,7 +158,7 @@ export interface RequestLogContext extends UpstreamErrorDiagnostics {
    *  cannot absorb unrelated traffic. */
   apiKeyId?: string;
   /** Which kind of admission opened this request. Carries no secret. */
-  admissionKind?: "configured" | "environment" | "loopback";
+  admissionKind?: "configured" | "environment" | "loopback" | "anonymous";
   /** Which inbound wire was used. Orthogonal to `surface`, which names the client
    *  product: widening that enum would merge Responses and Chat Completions,
    *  since both leave it undefined. */
@@ -317,7 +317,7 @@ export interface RequestLogEntry extends UpstreamErrorDiagnostics {
    *  cannot absorb unrelated traffic. */
   apiKeyId?: string;
   /** Which kind of admission opened this request. Carries no secret. */
-  admissionKind?: "configured" | "environment" | "loopback";
+  admissionKind?: "configured" | "environment" | "loopback" | "anonymous";
   /** Which inbound wire was used. Orthogonal to `surface`, which names the client
    *  product: widening that enum would merge Responses and Chat Completions,
    *  since both leave it undefined. */

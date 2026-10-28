@@ -5,6 +5,8 @@ description: 使用仅回环管理入口、Tailscale Serve 和无头 OAuth 运�
 
 有关 SSH 机器链接，请参阅[远程链接](/zh-cn/guides/remote-link/)。
 
+`ocx connect` 和 `ocx hub invite` 也支持明确的私有 IPv4 HTTP 地址（例如 `http://192.168.50.83:10100`），覆盖配对、模型同步、用量读取和客户端密钥生命周期。公网 HTTP 和 DNS 主机名仍要求 HTTPS；认证、CSRF、来源绑定及禁止重定向的规则保留。明文 HTTP 会暴露网络路径上的凭据和请求内容，仅用于可信局域网。专用管理入口仍只绑定回环地址，局域网直连使用主监听器。
+
 Remote Hub 将提供商凭据、模型目录和使用记录保存在一台主机上，经过身份验证的客户端直接访问其数据平面。管理平面相互独立：可选管理监听器只绑定 `127.0.0.1`，仅提供控制台和 `/api/*`。它不提供 `/v1/*`、`/healthz`、`/readyz` 或 WebSocket。不要直接发布 `10101`，也不要使用 Tailscale Funnel。
 
 ## 角色与信任边界

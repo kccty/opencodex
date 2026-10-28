@@ -26,9 +26,16 @@ bun run dev:gui
 
 ## Sign-in
 
+Private IPv4 access needs no login or trust switch. Bind `hostname` to `0.0.0.0` and use
+`http://<LAN IPv4>:<port>` for the dashboard, management API and model calls. The same listener
+also serves `127.0.0.1:<port>`. Disable `unauthenticatedLoopbackListener` and
+`hub.managementIngress` for this single-listener setup. LAN management requests require no
+token, and the dashboard automatically enters after every refresh. Any device able to reach
+that LAN address can manage the proxy, including viewing stored data keys.
+
 On the default loopback bind (`localhost` / `127.0.0.1`) the dashboard never asks for a token:
 the proxy mints short-lived GUI sessions into the served page and renews them silently when
-they expire or the proxy restarts. Only a dashboard bound to a non-loopback hostname requires
+they expire or the proxy restarts. Public-address and DNS-hostname dashboard access requires
 the admin token (`OPENCODEX_ADMIN_AUTH_TOKEN`, or the auto-generated
 `~/.opencodex/admin-api-token` file).
 

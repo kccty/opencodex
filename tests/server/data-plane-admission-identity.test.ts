@@ -174,13 +174,13 @@ describe("the two wrappers still differ", () => {
     expect(requireResponsesApiAuth(request({ authorization: "Bearer ocx_data_firstsecret" }), config)).toBeNull();
   });
 
-  test("a bearer that is NOT our secret stays unadmitted on the Responses path (#1686)", () => {
+  test("a bearer that is not our secret is admitted anonymously on the Responses path (#1686)", () => {
     const config = remoteConfig();
-    // This is the Codex Direct passthrough case: an upstream ChatGPT bearer must not be
-    // mistaken for admission, or the two bearer domains would mix after all.
+    // Codex Direct passthrough: an upstream ChatGPT bearer is not one of our secrets, so it is
+    // admitted anonymously and the adapter decides whether to forward it upstream.
     const foreign = request({ authorization: "Bearer sk-some-upstream-key" });
-    expect(resolveResponsesApiAuth(foreign, config)).toBeNull();
-    expect(requireResponsesApiAuth(foreign, config)?.status).toBe(401);
+    expect(resolveResponsesApiAuth(foreign, config)).toEqual({ kind: "anonymous", source: "anonymous" });
+    expect(requireResponsesApiAuth(foreign, config)).toBeNull();
   });
 
   test("the dedicated header still wins over a bearer (#1686)", () => {

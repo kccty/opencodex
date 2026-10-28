@@ -220,10 +220,10 @@ export function deriveCodexInjectionPlan(
 
   // Provider-table form: non-loopback admission or an explicit Desktop policy.
   const providerTableMode = usesProviderTable(routingTarget);
-  // Client compaction is the one table form that must not orphan existing threads. It changes
-  // the DEFAULT provider to `opencodex`, but a thread already tagged `openai` keeps resolving
-  // to Codex's built-in entry, and without the root override that entry is api.openai.com —
-  // the thread would resume outside this proxy and outside configured routing. Keeping the
+  // Every table form must also keep existing threads on this proxy. The table changes the
+  // DEFAULT provider to `opencodex`, but a thread already tagged `openai` keeps resolving to
+  // Codex's built-in entry, and without the root override that entry is api.openai.com — the
+  // thread would resume outside this proxy and outside configured routing. Keeping the
   // marker-owned root override alongside the table fixes that at the source: codex builds its
   // provider map as merge_configured_model_providers(built_in_model_providers(openai_base_url),
   // model_providers), so the override lands on the built-in `openai` entry when the map is
@@ -233,19 +233,17 @@ export function deriveCodexInjectionPlan(
   // the root line we inject nothing, and the built-in entry keeps whatever destination they
   // chose, so an `openai`-tagged thread follows their configuration rather than this proxy.
   //
+  // Data-plane authentication is disabled, so an admission-token form can retain the root key
+  // too: the built-in provider cannot carry x-opencodex-api-key, but the endpoint no longer
+  // requires it. Authless Desktop is the one exception — its whole point is a provider with
+  // requires_openai_auth = false, and a root override would put the built-in entry back behind
+  // ChatGPT auth.
+  //
   // Re-tagging history was the alternative and it cannot be made durable: the length-preserving
   // first-line repair cannot grow "openai" into "opencodex" without pre-existing padding, and
   // codex re-appends that stale first line whenever it writes git or memory-mode metadata.
-  //
-  // Authless is excluded on purpose: its whole point is a provider that carries
-  // requires_openai_auth = false, and admission-token forms cannot use the root key at all.
-  // Those two forms therefore keep their existing behaviour, forward-tagging resume history with
-  // originals backed up, and that includes the case where a user enables authless and client
-  // compaction together. Only the compaction-only form skips the history unit.
   let keepRootOverrideAlongsideTable = providerTableMode
-    && routingTarget.clientCompaction === true
-    && routingTarget.desktopAuthless !== true
-    && routingTarget.requiresAdmissionToken !== true;
+    && routingTarget.desktopAuthless !== true;
   let keptUserBaseUrl = false;
   let keptUserRealtimeWsBaseUrl = false;
   if (providerTableMode) {
