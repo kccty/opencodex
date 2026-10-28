@@ -169,6 +169,34 @@ const commandRunners: Record<string, CommandRunner> = {
         else console.error(message);
         return code;
       };
+      // A connected client's proxy is its hub (or its link parent), not a listener on this machine,
+      // and its Codex history is the hub's concern: the client sync re-points with the hub target
+      // and the client's own history policy. Going through `findLiveProxy` instead wrote the
+      // standalone loopback URL and then refused on paginated history, so after `ocx restore` a hub
+      // client could not switch back at all.
+      const { readClientConnectionState } = await import("../client/state");
+      const clientState = readClientConnectionState();
+      if (clientState.kind === "connected") {
+        const wanted = setIntegrationEnabled("codex", true);
+        if (!wanted.ok) {
+          return emitBack(false, `Codex desired state was not saved (${wanted.reason}).`, wanted.reason === "conflict" ? 2 : 1);
+        }
+        const { syncConnectedClient } = await import("../client/connect");
+        try {
+          const synced = await syncConnectedClient({ restartCodex: false });
+          return emitBack(
+            true,
+            `Plain \`codex\` now routes through opencodex at ${synced.connection.serverUrl} (undo with: ocx restore).`,
+            0,
+          );
+        } catch (error) {
+          return emitBack(
+            false,
+            `Plain \`codex\` was not switched back to opencodex: ${error instanceof Error ? error.message : String(error)}`,
+            1,
+          );
+        }
+      }
       const live = await deps.findLiveProxy();
       if (!live) {
         return emitBack(false, "No running proxy found. Run 'ocx start' — it injects opencodex automatically.", 1);

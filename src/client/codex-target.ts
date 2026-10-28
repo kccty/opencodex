@@ -32,15 +32,6 @@ export function routingTarget(
   };
 }
 
-function connectedClient(): OcxClientConnectionConfig | null {
-  try {
-    const state = readClientConnectionState();
-    return state.kind === "connected" && !state.value.pendingOperation ? state.value : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The target to write when a caller supplies none.
  *
@@ -55,12 +46,14 @@ export function defaultCodexRoutingTarget(
   port: number,
   config?: OcxConfig,
 ): ClientCodexRoutingTarget {
-  const connection = connectedClient();
-  if (!connection) return standaloneCodexRoutingTarget(port, config);
-  const configPort = config?.port ?? port;
+  const state = readClientConnectionState();
+  if (state.kind !== "connected" || state.value.pendingOperation) {
+    return standaloneCodexRoutingTarget(port, config);
+  }
+  const connection = state.value;
   return routingTarget(
     connection.serverUrl,
-    isLinkConnection(connection) ? configPort : undefined,
+    isLinkConnection(connection) ? config?.port ?? port : undefined,
     config,
   );
 }
