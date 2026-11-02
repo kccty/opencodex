@@ -6,7 +6,7 @@ import {
   comboModelId,
   comboPublicModelId,
   draftEquals,
-  intersectComboEfforts,
+  unionComboEfforts,
   updateComboAliasDraft,
   validateComboDraft,
 } from "../combo-workspace-data";
@@ -115,8 +115,8 @@ export function DetailPanel({
     return map;
   }, [capabilityModels]);
   const allowedEfforts = useMemo(
-    () => intersectComboEfforts(draft.targets, effortMap, draft.reasoningEffortMode ?? "strict"),
-    [draft.targets, effortMap, draft.reasoningEffortMode],
+    () => unionComboEfforts(draft.targets, effortMap),
+    [draft.targets, effortMap],
   );
 
   const updateDraft = useCallback((updater: (prev: ComboItem) => ComboItem) => {

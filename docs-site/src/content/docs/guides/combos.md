@@ -818,21 +818,14 @@ thinking mode must be passed back to the API`.
 
 `defaultEffort` supplies a configured effort when the selected target has a known, nonempty supported ladder. With the default `defaultEffortMode: "fallback"`, an explicit caller effort keeps precedence. `defaultEffortMode: "force"` overrides a valid caller effort with the configured default; it requires a valid, non-null `defaultEffort` and can increase cost and latency. Force mode is an explicit operator choice through combo configuration or management.
 
-The target's advertised ladder remains authoritative. An exact supported value is retained; otherwise the highest supported rung at or below it is selected, or the lowest supported rung when none is lower. Unknown or empty ladders never cause default injection. Force mode does not repair malformed caller effort into a valid expensive request. Other reasoning fields, including `reasoning.summary`, are preserved.
+The target's advertised ladder remains authoritative. An exact supported value is retained; otherwise the highest supported rung at or below it is selected, or the lowest supported rung when none is lower. The same mapping applies to an explicit caller effort. Unknown or empty ladders never cause default injection. Force mode does not repair malformed caller effort into a valid expensive request. Other reasoning fields, including `reasoning.summary`, are preserved.
 
 `reasoningEffortMode` remains independent of `defaultEffortMode`: explicit empty ladders remove unsupported effort/thinking controls, and adaptive unknown ladders do so as well, as described below. Strict unknown ladders preserve the caller's request without forcing a default. Supported defaults are `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`; omit `defaultEffort` or set it to `null` to disable default injection in fallback mode.
 
 ### Mixed-capability groups (`reasoningEffortMode`)
 
-The effort levels a combo advertises are the intersection of what its targets advertise. A target
-that explicitly advertises **no** effort control takes part in that intersection, so a single
-no-effort backup empties the effort picker for the whole combo — including for the targets that do
-support tuning.
-
-Set `reasoningEffortMode: "adaptive"` to exclude those empty ladders from the published
-intersection instead. The picker then shows the levels the remaining targets share, and the
-no-effort target stays eligible for routing. Targets whose ladder is simply *unknown* are treated
-as wildcards in both modes.
+The effort levels a combo advertises are the union of what its targets advertise. A lower-capability
+or no-effort target therefore does not hide levels supported by its siblings.
 
 ```json
 {
@@ -848,11 +841,11 @@ as wildcards in both modes.
 }
 ```
 
-The default is `"strict"`, which keeps the original picker behavior. This setting does not change
-target order or failover policy. At dispatch, an explicitly empty target ladder has its unsupported
+The default is `"strict"`. This setting does not change target order, failover policy, or the
+advertised union. At dispatch, an explicitly empty target ladder has its unsupported
 effort/thinking controls removed in either mode while preserving supported non-effort reasoning fields
 such as `reasoning.summary`; `"adaptive"` applies the same normalization to an unknown target
-capability, while known non-empty targets keep their existing per-target effort resolution.
+capability, while known non-empty targets map the requested effort to the nearest lower supported rung.
 In the dashboard it is the **Adaptive reasoning ladder** switch in a
 combo's Capabilities section.
 
@@ -1013,7 +1006,7 @@ Combos are stored in the top-level `combos` object, keyed by combo id:
 | `cooldownWaitPolicy` | No | unset | `"before-last-resort"` defers targets marked `lastResort`: they are used only when no normal target is available, for every strategy, and `waitForCooldownMs` only adds the wait for a cooling normal target, so at its `0` default nothing waits and the last resort is used as soon as no normal target is available. Only that exact string opts in. The deferral wait and the ordinary wait share one `waitForCooldownMs` budget per selection attempt. |
 | `defaultEffort` | No | `null` | `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`; resolved against each target's advertised ladder. |
 | `defaultEffortMode` | No | `"fallback"` | `"fallback"` preserves explicit caller effort. `"force"` overrides valid caller effort, requires a valid non-null default, and can increase cost and latency. |
-| `reasoningEffortMode` | No | `"strict"` | `"strict"` intersects every known target ladder, so one target advertising no effort control empties the combo's picker. `"adaptive"` excludes those empty ladders from the published intersection. At dispatch, explicit empty or adaptive unknown ladders remove unsupported effort/thinking controls while preserving supported non-effort reasoning fields such as `reasoning.summary`; known non-empty targets keep existing effort resolution. |
+| `reasoningEffortMode` | No | `"strict"` | Catalog advertisement uses the union of every target ladder in both modes. At dispatch, explicit empty or adaptive unknown ladders remove unsupported effort/thinking controls while preserving supported non-effort reasoning fields such as `reasoning.summary`; known non-empty targets map effort to the nearest lower supported rung. |
 | `imageInput` | No | `"auto"` | `"auto"` or `"disabled"`. `"auto"` publishes image support only when every target supports images; `"disabled"` forces text-only (drops image from published modalities and rejects image-bearing requests before dispatch). |
 | `alias` | No | none | Optional trimmed public model id; use the alias rules above. An empty value is stored as no alias. |
 | `nativeAlias` | No | `false` | Explicitly permit a currently supported bare native `alias` to take routing and catalog precedence. Never inferred from the alias. |

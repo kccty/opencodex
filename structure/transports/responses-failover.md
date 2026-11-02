@@ -149,7 +149,7 @@ cooldown is live. A stale-generation refusal cannot borrow a sibling request's s
 `supportedLadderFor` result to `src/combos/request.ts` before adapter parsing. Explicit empty
 capability ladders remove effort and legacy alternative thinking controls in every combo mode; adaptive mode also
 removes those controls for unknown ladders. Independent `reasoning.enabled` and `reasoning.summary` survive. Known non-empty
-ladders retain the existing per-target effort resolution. This request normalization does not
+ladders map explicit caller efforts and defaults to the nearest lower supported rung. This request normalization does not
 change target order or attempt accounting; provider-400 decisions follow the [request-local target compatibility](../runtime.md#request-local-target-compatibility) contract.
 
 The shared Responses path follows the [bounded multipart recovery contract](../subagents.md#multipart-encrypted-task-recovery); credential admission and retry policy remain unchanged.

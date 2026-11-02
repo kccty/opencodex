@@ -150,9 +150,9 @@ ocx combo set balanced \
 
 ## 異なる reasoning capability の組み合わせ
 
-`reasoningEffortMode` の既定値は `"strict"` です。明示的な空リストを含む全対象の effort リストの共通部分を公開します。`"adaptive"` は空リストを共通部分の計算から除外し、混在するコンボでも選択肢を維持します。不明なリストは、どちらのモードでもカタログの共通部分を制限しません。
+`reasoningEffortMode` の既定値は `"strict"` ですが、カタログは両モードで対象 effort リストの和集合を公開します。能力が低い対象が、ほかの対象で使えるレベルを隠すことはありません。不明なリストは公開レベルに寄与しません。
 
-送信時には、明示的な空リストの対象で effort と thinking の制御を両モードとも削除します。不明な対象で削除するのは adaptive のみです。`reasoning.summary` と effort 以外のフィールドは保持し、既知の空でない対象は従来どおり effort を解決します。strict の不明な対象と通常の native Chat の不明な宣言は保持します。既定値の補完は既存の effort を上書きしませんが、この正規化は非対応の制御を削除できます。
+送信時には、明示的な空リストの対象で effort と thinking の制御を両モードとも削除します。不明な対象で削除するのは adaptive のみです。`reasoning.summary` と effort 以外のフィールドは保持し、既知の空でない対象は明示または既定の effort を最も近い低い対応段階へ対応付けます。strict の不明な対象と通常の native Chat の不明な宣言は保持します。既定値の補完は既存の effort を上書きしませんが、この正規化は非対応の制御を削除できます。
 
 ## 暗号化された v2 サブエージェント タスク
 
@@ -244,7 +244,7 @@ ocx combo remove <id> --yes
 | `waitForCooldownMs` |いいえ | `0` | 0 ～ 600000 の整数。最も早く利用可能になる冷却中のターゲットを待ってから `combo_unavailable` を返すまでの最大待機時間。中止すると待機はキャンセルされます。 |
 | `cooldownWaitPolicy` | いいえ | 未設定 | `"before-last-resort"` は、通常のターゲットがクールダウン中で、その残り時間が `waitForCooldownMs` に収まる間、`lastResort` を付けたターゲットを後回しにします。`lastResort` を付けたターゲットは、通常のターゲットが 1 つも利用できない場合にのみ使用されます。この文字列のみが有効です。後回しの待機と通常の待機は、1 回の選択につき同じ `waitForCooldownMs` の予算を共有します。 |
 | `defaultEffort` |いいえ | `null` | `low`、`medium`、`high`、`xhigh`、`max`、または `ultra`;呼び出し元が努力を省略し、ターゲットがサポートをアドバタイズした場合にのみ適用されます。 |
-| `reasoningEffortMode` | いいえ | `"strict"` | `strict` または `adaptive`。混在する capability の共通部分と対象別の制御正規化を選択します。 |
+| `reasoningEffortMode` | いいえ | `"strict"` | `strict` または `adaptive`。カタログは capability の和集合を使用し、リクエストは対象別に正規化します。 |
 | `alias` |いいえ |なし |オプションのトリミングされたパブリック モデル ID。上記のエイリアス ルールを使用します。空の値はエイリアスなしで保存されます。 |
 | `nativeAlias` |いいえ | `false` | 現在サポートされている bare native alias に routing/catalog の優先権を明示的に与えます。 |
 | `displayName` |いいえ |なし | catalog 表示専用ラベル。`nativeAlias` が true の場合は必須です。 |

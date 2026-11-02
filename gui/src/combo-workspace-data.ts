@@ -72,37 +72,24 @@ export const JEV_DECISION_ISSUE_LABEL_KEYS: Record<JevDecisionIssue, TKey> = {
 };
 
 
-/**
- * Intersection of advertised effort ladders for picker availability.
- * Unknown ladders are wildcards here only; runtime injection remains fail-closed.
- */
-export function intersectComboEfforts(
+/** Union of advertised effort ladders for picker availability. */
+export function unionComboEfforts(
   targets: readonly ComboTarget[],
   modelEfforts: ReadonlyMap<string, readonly string[] | undefined>,
-  reasoningEffortMode: "strict" | "adaptive" = "strict",
 ): ComboEffort[] {
   const complete = targets.filter((t) => t.provider.trim() && t.model.trim());
   if (complete.length === 0) return [...COMBO_EFFORTS];
-  const effortSet = new Set<string>(COMBO_EFFORTS);
-  let common: string[] | null = null;
+  const union = new Set<string>();
   for (const target of complete) {
     const key = `${target.provider.trim()}/${target.model.trim()}`;
     const listed = modelEfforts.get(key);
     if (listed === undefined) continue;
-    // Adaptive mirrors the served catalog: a target advertising no effort control is
-    // excluded from the intersection rather than collapsing it for every sibling.
-    if (reasoningEffortMode === "adaptive" && listed.length === 0) continue;
-    const member = listed.filter((effort) => effortSet.has(effort));
-    if (common === null) {
-      common = member;
-    } else {
-      const memberSet = new Set(member);
-      common = common.filter((effort) => memberSet.has(effort));
+    for (const effort of listed) {
+      if ((COMBO_EFFORTS as readonly string[]).includes(effort)) union.add(effort);
     }
   }
-  if (common === null) return [...COMBO_EFFORTS];
-  const commonSet = new Set(common);
-  return COMBO_EFFORTS.filter((effort) => commonSet.has(effort));
+  if (union.size === 0) return [];
+  return COMBO_EFFORTS.filter((effort) => union.has(effort));
 }
 
 export interface ComboTarget {
@@ -161,10 +148,7 @@ export interface ComboItem {
   stickyLimit: number;
   defaultEffort: ComboEffort | null;
   imageInput?: "auto" | "disabled";
-  /**
-   * Picker-ladder policy. `adaptive` lets targets that advertise no effort control drop
-   * out of the intersection instead of emptying it for the whole group.
-   */
+  /** Request policy for targets whose effort capability is unknown. */
   reasoningEffortMode?: "strict" | "adaptive";
   /** `jev` only: self-hosted decision provider id; null/omitted = canonical TypeSafe JEV. */
   decisionProvider?: string | null;

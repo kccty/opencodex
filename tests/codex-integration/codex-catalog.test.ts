@@ -227,7 +227,7 @@ describe("combo catalog capability intersection", () => {
     parallelToolCalls: false,
   };
 
-  test("derives only capabilities common to every member", () => {
+  test("derives capabilities from every member", () => {
     const derived = deriveComboCatalogModel(
       "mixed",
       normalizedCombo({ defaultEffort: "high" }),
@@ -242,8 +242,8 @@ describe("combo catalog capability intersection", () => {
       maxInputTokens: 100_000,
       autoCompactTokenLimit: 100_000,
       inputModalities: ["text"],
-      reasoningEfforts: ["low", "medium"],
-      defaultReasoningEffort: "medium",
+      reasoningEfforts: ["low", "medium", "high"],
+      defaultReasoningEffort: "high",
     });
   });
 
@@ -279,7 +279,7 @@ describe("combo catalog capability intersection", () => {
       { ...memberB, inputModalities: ["image", "text"], reasoningEfforts: ["xhigh"], parallelToolCalls: true },
     ])).toEqual(expect.objectContaining({
       inputModalities: ["text", "image"],
-      reasoningEfforts: [],
+      reasoningEfforts: ["low", "medium", "high", "xhigh"],
       parallelToolCalls: true,
     }));
     expect(deriveComboCatalogModel("unknown", normalizedCombo(), [
@@ -296,49 +296,35 @@ describe("combo catalog capability intersection", () => {
     ])?.defaultReasoningEffort).toBe("medium");
   });
 
-  test("treats undefined effort ladders as wildcards and empty ladders as restrictive", () => {
-    // One recovered target with no ladder must not zero the advertised intersection.
-    expect(deriveComboCatalogModel("wildcard", normalizedCombo({ defaultEffort: "medium" }), [
-      memberA,
+  test("unknown, empty, and sentinel effort ladders contribute their known rungs", () => {
+    // One target with no known ladder contributes nothing until dispatch.
+    expect(deriveComboCatalogModel("sentinels", normalizedCombo({ defaultEffort: "medium" }), [
+      { ...memberA, reasoningEfforts: ["none", "minimal", "low"] },
       { ...memberB, reasoningEfforts: undefined },
     ])).toEqual(expect.objectContaining({
-      reasoningEfforts: ["low", "medium", "high"],
-      defaultReasoningEffort: "medium",
+      reasoningEfforts: ["none", "minimal", "low"],
+      defaultReasoningEffort: "low",
     }));
-    // Explicit empty ladder still constrains to nothing.
+    // Explicit empty ladder does not erase a sibling's advertised rungs.
     const empty = deriveComboCatalogModel("empty", normalizedCombo({ defaultEffort: "medium" }), [
       memberA,
       { ...memberB, reasoningEfforts: [] },
     ]);
-    expect(empty?.reasoningEfforts).toEqual([]);
-    expect(empty).not.toHaveProperty("defaultReasoningEffort");
+    expect(empty?.reasoningEfforts).toEqual(["low", "medium", "high"]);
+    expect(empty?.defaultReasoningEffort).toBe("medium");
   });
 
-  test("adaptive mode keeps the surviving ladder when a target advertises no effort control", () => {
-    // The strict case above is the baseline: memberB's explicit [] empties the picker for
-    // the whole combo. Adaptive is the opt-in that excludes it instead, so the effort
-    // control stays usable for the siblings that do support tuning.
-    const adaptive = deriveComboCatalogModel(
-      "adaptive",
-      normalizedCombo({ defaultEffort: "medium", reasoningEffortMode: "adaptive" }),
-      [memberA, { ...memberB, reasoningEfforts: [] }],
-    );
-    expect(adaptive?.reasoningEfforts).toEqual(["low", "medium", "high"]);
-    expect(adaptive?.defaultReasoningEffort).toBe("medium");
-
-    // Adaptive only drops EMPTY ladders; non-empty ones still intersect normally.
-    expect(deriveComboCatalogModel(
-      "adaptive-intersect",
-      normalizedCombo({ defaultEffort: "medium", reasoningEffortMode: "adaptive" }),
-      [memberA, { ...memberB, reasoningEfforts: ["medium", "high"] }],
-    )?.reasoningEfforts).toEqual(["medium", "high"]);
-
-    // Every target empty under adaptive still yields no ladder — there is nothing to keep.
-    expect(deriveComboCatalogModel(
-      "adaptive-all-empty",
-      normalizedCombo({ defaultEffort: "medium", reasoningEffortMode: "adaptive" }),
-      [{ ...memberA, reasoningEfforts: [] }, { ...memberB, reasoningEfforts: [] }],
-    )?.reasoningEfforts).toEqual([]);
+  test("reasoning effort mode does not change the advertised union", () => {
+    for (const mode of ["strict", "adaptive"] as const) {
+      expect(deriveComboCatalogModel(
+        `union-${mode}`,
+        normalizedCombo({ defaultEffort: "medium", reasoningEffortMode: mode }),
+        [memberA, { ...memberB, reasoningEfforts: ["high", "xhigh"] }],
+      )).toEqual(expect.objectContaining({
+        reasoningEfforts: ["low", "medium", "high", "xhigh"],
+        defaultReasoningEffort: "medium",
+      }));
+    }
   });
 
   test("fails closed for missing members, unknown context, duplicate targets, and empty modalities", () => {
@@ -400,7 +386,7 @@ describe("combo catalog capability intersection", () => {
       const row = buildCatalogEntries(template, [], [model], undefined, false, "default", exact)
         .find(entry => entry.slug === "combo/mixed");
       expect((row?.supported_reasoning_levels as Array<{ effort: string }>).map(level => level.effort))
-        .toEqual(["low", "medium"]);
+        .toEqual(["low", "medium", "high"]);
       expect(row?.default_reasoning_level).toBe("medium");
       expect(row?.input_modalities).toEqual(["text"]);
     }
@@ -412,7 +398,7 @@ describe("combo catalog capability intersection", () => {
     );
     const row = merged.find(entry => entry.slug === "combo/mixed");
     expect((row?.supported_reasoning_levels as Array<{ effort: string }>).map(level => level.effort))
-      .toEqual(["low", "medium"]);
+      .toEqual(["low", "medium", "high"]);
     expect(row?.input_modalities).toEqual(["text"]);
     expect(row?.owned_by).toBe("combo");
   });
@@ -537,7 +523,7 @@ describe("combo catalog capability intersection", () => {
     const row = buildCatalogEntries(null, [], [model], undefined, false, "default", new Set([alias]))[0]!;
 
     expect((row.supported_reasoning_levels as Array<{ effort: string }>).map(level => level.effort))
-      .toEqual(["low", "medium"]);
+      .toEqual(["low", "medium", "high"]);
     expect(row.input_modalities).toEqual(["text"]);
   });
 
@@ -1494,7 +1480,7 @@ describe("combo catalog capability intersection", () => {
       expect(combo).toBeDefined();
       expect(combo!.contextWindow).toBe(100_000);
       expect(combo!.inputModalities).toEqual(["text"]);
-      expect(combo!.reasoningEfforts).toEqual(["low", "medium"]);
+      expect(combo!.reasoningEfforts).toEqual(["low", "medium", "high"]);
       // Synthesized member must not leak as a standalone routed row.
       expect(rows.some(r => r.provider === "a" && r.id === "unlisted")).toBe(false);
       const { getLastComboCatalogOmissions } = await import("../../src/codex/catalog");

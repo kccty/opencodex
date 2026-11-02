@@ -67,7 +67,7 @@ export interface NormalizedComboConfig {
   defaultEffort: OcxComboDefaultEffort | null;
   /** Client-precedence policy; `fallback` preserves legacy behavior. */
   defaultEffortMode: OcxComboDefaultEffortMode;
-  /** Picker-ladder derivation policy; `strict` preserves the legacy intersection rule. */
+  /** Request policy for member effort capabilities that discovery could not determine. */
   reasoningEffortMode: OcxComboReasoningEffortMode;
   /** Disable image input; `auto` preserves the intersection derived from all targets. */
   imageInput: "auto" | "disabled";

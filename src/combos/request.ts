@@ -76,7 +76,6 @@ export function concreteComboRequestBody(
     || (reasoningEffortMode === "adaptive" && targetReasoningEfforts === undefined)) {
     stripUnsupportedReasoningControls(clone);
   }
-  if (!defaultEffort || !isCodexReasoningEffort(defaultEffort)) return clone;
   const reasoning = clone.reasoning;
   const reasoningRecord = reasoning && typeof reasoning === "object" && !Array.isArray(reasoning)
     ? reasoning as Record<string, unknown>
@@ -89,7 +88,23 @@ export function concreteComboRequestBody(
   // `none` and `minimal` are valid request sentinels even though they are outside the ranked
   // low..ultra Codex ladder. Force mode means the combo policy wins over any valid declared
   // caller effort, including those sentinels.
-  const shouldForce = defaultEffortMode === "force" && declaredCallerEffort;
+  const validDefault = !!defaultEffort && isCodexReasoningEffort(defaultEffort);
+  const shouldForce = validDefault && defaultEffortMode === "force" && declaredCallerEffort;
+  if (
+    !shouldForce
+    && declaredCallerEffort
+    && typeof callerEffort === "string"
+    && isCodexReasoningEffort(callerEffort)
+    && targetReasoningEfforts !== undefined
+  ) {
+    const clampedCaller = resolveEffortAtOrBelow(callerEffort, targetReasoningEfforts);
+    if (clampedCaller && clampedCaller !== callerEffort && reasoningRecord) {
+      clone.reasoning = { ...reasoningRecord, effort: clampedCaller };
+    } else if (!clampedCaller) {
+      stripUnsupportedReasoningControls(clone);
+    }
+  }
+  if (!validDefault) return clone;
   if (!needsDefault && !shouldForce) return clone;
   // Picker availability treats an unknown ladder as a wildcard, but runtime
   // injection stays fail-closed until this concrete target advertises support.

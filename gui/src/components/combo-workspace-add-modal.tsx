@@ -5,7 +5,7 @@ import {
   comboQuotaState,
   comboPublicModelId,
   emptyDraft,
-  intersectComboEfforts,
+  unionComboEfforts,
   validateComboDraft,
 } from "../combo-workspace-data";
 import { IconX } from "../icons";
@@ -64,8 +64,8 @@ export function AddComboModal({
     return map;
   }, [capabilityModels]);
   const allowedEfforts = useMemo(
-    () => intersectComboEfforts(draft.targets, effortMap, draft.reasoningEffortMode ?? "strict"),
-    [draft.targets, effortMap, draft.reasoningEffortMode],
+    () => unionComboEfforts(draft.targets, effortMap),
+    [draft.targets, effortMap],
   );
   const allTargetsExhausted = comboQuotaState(draft.targets, providerQuotaStates, providerMap) === "exhausted";
   const isJevPreset = initialDraft?.strategy === "jev";

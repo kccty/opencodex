@@ -9,7 +9,7 @@ import { clearModelCache, DEFAULT_MODEL_CACHE_TTL_MS, getFreshCached, getStaleCa
 import { buildModelsRequest, resolveModelsAuthToken } from "../../oauth";
 import type { OcxConfig, OcxProviderConfig } from "../../types";
 import { modelInList } from "../../types";
-import { CODEX_REASONING_LEVELS, codexEffortRank, configuredReasoningEfforts, modelRecordValue, resolveEffortAtOrBelow, sanitizeCodexReasoningEfforts } from "../../reasoning-effort";
+import { CODEX_REASONING_LEVELS, canonicalizeReasoningEfforts, codexEffortRank, configuredReasoningEfforts, modelRecordValue, resolveEffortAtOrBelow, sanitizeCodexReasoningEfforts } from "../../reasoning-effort";
 import { getModelMetadata, getModelMetadataCaseInsensitive, listModelMetadata, resolveMetadataProvider } from "../../generated/model-metadata";
 import { enrichProviderFromRegistry, shouldCaseFoldMetadataModelId } from "../../providers/derive";
 import { getProviderRegistryEntry } from "../../providers/registry";
@@ -134,22 +134,13 @@ export function deriveComboCatalogModel(
     ? derivedInputModalities.filter(modality => modality !== "image")
     : derivedInputModalities;
   if (inputModalities.length === 0) return null;
-  // Unknown ladders (`undefined`) are wildcards for catalog derivation — same
-  // boundary as the GUI picker. Under the default `strict` mode an explicit empty
-  // ladder still constrains, so one target that advertises no effort control empties
-  // the whole combo's picker. `adaptive` is the opt-in for mixed-capability groups:
-  // empty ladders drop out of the published intersection while non-empty ladders
-  // still define it. Dispatch is unaffected either way — each concrete target
-  // resolves its own effort at request time.
-  const knownLadders = members
-    .map(member => member.reasoningEfforts)
-    .filter((ladder): ladder is string[] => ladder !== undefined);
-  const advertisedLadders = combo.reasoningEffortMode === "adaptive"
-    ? knownLadders.filter(ladder => ladder.length > 0)
-    : knownLadders;
-  const reasoningEfforts = advertisedLadders.length === 0
-    ? []
-    : intersectStrings(advertisedLadders);
+  // The picker exposes every rung any member can serve. Dispatch resolves against
+  // the selected member's ladder, so a lower-capability backup never narrows the
+  // virtual model's advertised choices for its siblings. Unknown ladders contribute
+  // nothing until dispatch; empty ladders never erase a sibling's rungs.
+  const reasoningEfforts = canonicalizeReasoningEfforts(
+    members.flatMap(member => member.reasoningEfforts ?? []),
+  );
   const contextWindow = Math.min(...members.map(member => member.contextWindow!));
   const limitingMembers = members.filter(member => member.contextWindow === contextWindow);
   const hasLimitingContextCapMetadata = limitingMembers.some(

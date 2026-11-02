@@ -182,23 +182,23 @@ for (const provider of ["vision", "text"]) {
   });
 }
 
-test("disabled targets contribute their differing reasoning ladders to the intersection", async () => {
+test("disabled targets contribute their differing reasoning ladders to the union", async () => {
   mockCatalog([hiddenImage, { ...textModel, disabled: true }], [target(hiddenImage), target(textModel)]);
   await mount();
   await openDetail();
-  expect(effortValues()).toEqual(["", "high"]);
+  expect(effortValues()).toEqual(["", "low", "high", "xhigh"]);
 });
 
 for (const mode of ["strict", "adaptive"] as const) {
-  test(`${mode} mode respects a disabled target's empty reasoning ladder`, async () => {
+  test(`${mode} mode keeps a sibling's ladder when a target advertises none`, async () => {
     mockCatalog([hiddenImage, { ...textModel, disabled: true, reasoningEfforts: [] }],
       [target(hiddenImage), target(textModel)], { reasoningEffortMode: mode });
     await mount();
     await openDetail();
-    expect(effortValues()).toEqual(mode === "strict" ? [""] : ["", "low", "high"]);
+    expect(effortValues()).toEqual(["", "low", "high"]);
     const adaptive = container.querySelector<HTMLButtonElement>('button[aria-label="Adaptive reasoning ladder"]')!;
     await act(async () => { adaptive.click(); });
-    expect(effortValues()).toEqual(mode === "strict" ? ["", "low", "high"] : [""]);
+    expect(effortValues()).toEqual(["", "low", "high"]);
   });
 }
 
@@ -397,5 +397,5 @@ test("the add panel retains image and effort metadata after a selected model bec
   expect(effortValues("#cwi-new-effort")).toEqual([""]);
   expect(dialog.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!.value).toBe("hidden");
   await act(async () => { dialog.querySelector<HTMLButtonElement>('button[aria-label="Adaptive reasoning ladder"]')!.click(); });
-  expect(effortValues("#cwi-new-effort")).toEqual(["", "low", "medium", "high", "xhigh", "max", "ultra"]);
+  expect(effortValues("#cwi-new-effort")).toEqual([""]);
 });
