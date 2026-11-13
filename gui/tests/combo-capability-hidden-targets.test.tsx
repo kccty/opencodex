@@ -289,17 +289,17 @@ test("Combo opts into internal approval models and saves native and reseller rev
   expect(modelRequests[0]!.searchParams.get("includeInternalApproval")).toBe("true");
   await openDetail();
   await chooseProvider("openai");
-  const nativeModel = container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
-  expect([...nativeModel.options].map(option => option.value)).toEqual(["", "codex-auto-review"]);
-  expect(nativeModel.value).toBe("codex-auto-review");
+  const nativeModel = selectTrigger(container, MODEL);
+  expect(await selectOptionValues(nativeModel)).toEqual(["", "codex-auto-review"]);
+  expect(selectValue(nativeModel)).toBe("codex-auto-review");
   const addTarget = [...container.querySelectorAll<HTMLButtonElement>("button")]
     .find(button => button.textContent?.trim() === "Add target")!;
   await act(async () => { addTarget.click(); });
   const newTarget = container.querySelectorAll<HTMLElement>(".cwi-target-entry")[1]!;
   await chooseProvider("V-API", newTarget);
-  const resellerModel = newTarget.querySelector<HTMLSelectElement>('select[aria-label="Model"]')!;
-  expect([...resellerModel.options].map(option => option.value)).toEqual(["", "codex-auto-review"]);
-  expect(resellerModel.value).toBe("codex-auto-review");
+  const resellerModel = selectTrigger(newTarget, MODEL);
+  expect(await selectOptionValues(resellerModel)).toEqual(["", "codex-auto-review"]);
+  expect(selectValue(resellerModel)).toBe("codex-auto-review");
   const save = container.querySelector<HTMLButtonElement>("#cwi-edit-save")!;
   expect(save.disabled).toBe(false);
   await act(async () => { save.click(); });
