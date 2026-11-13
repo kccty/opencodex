@@ -1,10 +1,9 @@
 ---
 title: Hızlı Başlangıç
-description: İlk sağlayıcınızı yapılandırın ve OpenAI Codex'i üç komutta opencodex üzerinden yönlendirin.
+description: "opencodex’i kurun, ilk sağlayıcınızı ekleyin ve kullandığınız kodlama aracını bağlayın: Codex, Claude Code, Claude Desktop, Grok Build veya desteklenen başka bir araç."
 ---
 
-Bu kılavuz, yeni bir kurulumdan başlayarak Codex'i OpenAI harici bir model
-üzerinde çalıştırmanızı sağlar.
+Bu kılavuz, yeni kurulumdan kullandığınız kodlama aracındaki ilk isteğe kadar size yol gösterir. 1. ve 2. adımlar tüm araçlar için aynıdır; 3. adımda her araç için kısa bir bölüm vardır. [İstemci desteği sayfası](/tr/reference/client-support/) araçları ve bağlantı yöntemlerini listeler.
 
 ## 1. Kurulum sihirbazını çalıştırın
 
@@ -14,7 +13,7 @@ ocx init
 
 `ocx init` adım adım size rehberlik eder:
 
-1. **Bir sağlayıcı seçin** — yerleşik kayıt defterindeki 106 önayardan birini
+1. **Bir sağlayıcı seçin** — yerleşik kayıt defterindeki 107 önayardan birini
    veya bir temel URL ile adaptör yazmak için `custom` seçeneğini belirleyin.
 2. **API anahtarı** — bir anahtar yapıştırın veya `${ANTHROPIC_API_KEY}` gibi
    bir ortam değişkenine başvurun.
@@ -42,10 +41,19 @@ penceresi bildirir; Cursor kendi adaptör meta verilerini korur.
 
 ## 2. Proxy'yi başlatın
 
+Aşağıdaki seçeneklerden yalnızca birini çalıştırın; proxy ön planda kalır:
+
 ```bash
 ocx start            # varsayılan port 10100
+```
+
+Farklı bir bağlantı noktası için alternatif:
+
+```bash
 ocx start --port 8080
 ```
+
+Bu terminali açık bırakın. Sonraki durum ve kontrol paneli komutlarını aynı `OPENCODEX_HOME` ile ikinci bir terminalde çalıştırın.
 
 Başlatıldığında opencodex:
 
@@ -55,10 +63,7 @@ Başlatıldığında opencodex:
   yönlendirilen girdileri Codex'in model kataloğuna senkronize eder**,
 - `http://localhost:<port>/v1` üzerinde dinler.
 
-İstenen port meşgulse `ocx start` durur ve portu neyin tuttuğunu bildirir: orada bir
-opencodex yanıt veriyorsa önce `ocx stop` çalıştırın veya `ocx start --port <port>` ile
-boş bir portta başlatın. Kendiliğinden başka bir porta geçmez; önceki davranış, iki
-proxy'nin yan yana çalışmasına ve Codex'in daha yeni olana yönlendirilmesine neden oluyordu.
+Aynı `OPENCODEX_HOME` ile çalışan opencodex, boş bir port olsa bile ikinci kez başlatılamaz. Önce sahip örneği `ocx stop` ile durdurun veya farklı bir `OPENCODEX_HOME` seçin. Kardeş örnek kendi portunda doğrudan istekleri işler; Codex, Grok ve Claude ortak yönlendirmesini değiştirmez. Portu ilgisiz bir süreç tutuyorsa `ocx start` bunu bildirir; `ocx start --port <port>` ile boş bir port seçin. Port kendiliğinden değişmez.
 
 Kontrol edin:
 
@@ -67,9 +72,13 @@ ocx status
 ocx gui       # kontrol panelini canlı port üzerinde açın
 ```
 
-## 3. Codex'i kullanın
+## 3. Aracınızı bağlayın
 
-Codex artık opencodex ile şeffaf bir şekilde konuşur:
+Kullandığınız araca ait bölümü seçin. Birden fazla araç bağlayabilirsiniz; bunlar aynı sağlayıcıları ve modelleri paylaşır.
+
+### Codex
+
+1. adımda Codex istemini kabul ettiyseniz Codex artık opencodex ile şeffaf biçimde iletişim kurar. İstemi reddettiyseniz veya mevcut yapılandırma nedeniyle kurulum sona erdiyse Codex’i çalıştırmadan önce panelin **Connect** sayfasındaki Codex anahtarını açın; [Codex Entegrasyonu](/tr/guides/codex-integration/) değişiklikleri ve nasıl geri alınacağını açıklar.
 
 ```bash
 codex "Okunabilirlik için bu fonksiyonu yeniden düzenle"
@@ -82,6 +91,42 @@ gösterdiği `saglayici/model` biçimini kullanın:
 codex -m "anthropic/claude-opus-5" "Bu yığın izini (stack trace) açıkla"
 codex -m "ollama-cloud/glm-5.2"      "Bir SQL geçişi yaz"
 ```
+
+### Claude Code
+
+`claude` CLI kuruluysa:
+
+```bash
+ocx claude
+```
+
+`ocx claude`, çalışmıyorsa proxy’yi başlatır ve Claude Code’u ortamı opencodex’e yönlendirilmiş olarak açar. Ek argümanlar aynen iletilir. Katman varsayılanları, diğer başlatıcılar ve devre dışı bırakma için [Claude Code](/tr/guides/claude-code/) sayfasına bakın.
+
+### Claude Desktop
+
+```bash
+ocx claude desktop
+```
+
+Yeni kurulumda tüm uygulama için ağ geçidi profilini ayarlar. Zaten first-party modunu kullanan bir kurulum bu modu korur; açıkça geçiş yapmak için `ocx claude desktop apply --gateway` çalıştırın. Desktop’ı claude.ai üzerinde tutup yalnızca Code sekmesini yönlendiren first-party modu, [Claude Code](/tr/guides/claude-code/) sayfasındaki Claude Desktop modları bölümünde açıklanır.
+
+Mod değiştirdikten sonra Claude Desktop’tan tamamen çıkıp yeniden açın.
+
+### Grok Build
+
+Yerel dinleyicide `~/.grok` varsa `ocx start` görünür modelleri `~/.grok/config.toml` dosyasına kaydeder. Grok Build içinde bir `ocx-*` modeli seçin. Uzak kurulumlar ve yönetilen blok [Grok Build](/tr/guides/grok-build/) sayfasında anlatılır.
+
+Sağlayıcı veya model ekledikten sonra Grok Build’in görmesi için `ocx ensure` çalıştırın veya proxy’yi yeniden başlatın.
+
+### Diğer araçlar
+
+Yönetilen entegrasyonu olan araçlar (OpenCode, Pi, Qoder, WorkBuddy, Kilo, Cline, T3 Code ve diğerleri) panelin **Connect** sayfasından veya şu komutla bağlanır:
+
+```bash
+ocx integration client enable --client <id>
+```
+
+Her aracın yapılandırma dosyası ve değişikliğin ne zaman geçerli olacağı [Entegrasyonlar](/tr/guides/integrations/) sayfasında listelenir. Özel uç noktayı kabul eden diğer araçlar OpenAI uyumlu temel URL `http://localhost:10100/v1` veya Anthropic temel URL `http://localhost:10100` kullanabilir.
 
 ## Alt ajan modellerini seçin (isteğe bağlı)
 

@@ -1,9 +1,9 @@
 ---
 title: 빠른 시작
-description: 첫 프로바이더를 설정하고 명령어 세 개로 OpenAI Codex를 opencodex로 라우팅합니다.
+description: "opencodex를 설치하고 첫 프로바이더를 추가한 뒤 Codex, Claude Code, Claude Desktop, Grok Build 또는 다른 지원 코딩 도구를 연결합니다."
 ---
 
-이 가이드는 새로 설치한 상태에서 OpenAI가 아닌 모델로 Codex를 실행하기까지의 과정을 안내합니다.
+이 가이드는 새 설치부터 사용 중인 코딩 도구의 첫 요청까지 안내합니다. 1, 2단계는 모든 도구에 공통이며 3단계는 도구별로 나뉩니다. [클라이언트 지원 페이지](/ko/reference/client-support/)에서 도구와 연결 방법을 확인하세요.
 
 ## 독립 실행형 바이너리(npm 없음)
 
@@ -18,7 +18,7 @@ ocx init
 
 `ocx init`은 다음 과정을 안내합니다:
 
-1. **프로바이더 선택** — 내장 레지스트리 프리셋 106개 중 하나를 고르거나 `custom`을 선택해 base URL과 adapter를 직접 입력합니다.
+1. **프로바이더 선택** — 내장 레지스트리 프리셋 107개 중 하나를 고르거나 `custom`을 선택해 base URL과 adapter를 직접 입력합니다.
 2. **API 키** — 키를 붙여넣거나 `${ANTHROPIC_API_KEY}` 같은 환경 변수를 참조합니다.
 3. **기본 모델** — 키, 로컬, custom 프로바이더에서는 프리셋을 그대로 쓰거나 모델 ID를 직접 입력합니다.
 4. **프록시 포트** — 기본값은 `10100`입니다.
@@ -33,10 +33,19 @@ ocx init
 
 ## 2. 프록시 시작
 
+다음 두 방법 중 하나만 실행합니다. 프록시는 포그라운드에서 실행됩니다.
+
 ```bash
 ocx start            # defaults to port 10100
+```
+
+다른 포트를 사용하려면 다음 명령을 대신 실행합니다.
+
+```bash
 ocx start --port 8080
 ```
+
+이 터미널을 열어 두세요. 뒤에 나오는 상태 확인 및 대시보드 명령은 같은 `OPENCODEX_HOME`을 사용하는 두 번째 터미널에서 실행하세요.
 
 시작하면 opencodex는:
 
@@ -44,7 +53,7 @@ ocx start --port 8080
 - 프로바이더가 지원하는 경우 실시간 모델을 찾아 네이티브와 라우팅 항목을 **Codex 모델 카탈로그에 동기화**하고,
 - `http://localhost:<port>/v1`에서 수신 대기합니다.
 
-요청한 포트가 이미 사용 중이면 `ocx start`는 실행을 멈추고 무엇이 포트를 점유하고 있는지 알려 줍니다. opencodex가 응답하면 먼저 `ocx stop`을 실행하고, 빈 포트에서 시작하려면 `ocx start --port <port>`를 사용하세요. 이제 다른 포트로 자동 이동하지 않습니다. 이전 동작은 프록시 두 개를 동시에 실행한 채 Codex가 나중에 시작한 프록시를 가리키게 했습니다.
+동일한 `OPENCODEX_HOME`을 사용하는 opencodex가 실행 중이면 빈 포트라도 두 번째로 시작할 수 없습니다. 먼저 해당 인스턴스를 `ocx stop`으로 중지하거나 다른 `OPENCODEX_HOME`을 선택하세요. 형제 인스턴스는 자신의 포트에서 직접 요청을 처리하지만 Codex, Grok, Claude의 공유 라우팅은 변경하지 않습니다. 무관한 프로세스가 포트를 사용하면 `ocx start`가 알립니다. `ocx start --port <port>`로 빈 포트를 지정하세요. 포트는 자동으로 바뀌지 않습니다.
 
 확인:
 
@@ -53,9 +62,13 @@ ocx status
 ocx gui       # open the dashboard on the live port
 ```
 
-## 3. Codex 사용
+## 3. 도구 연결
 
-이제 Codex는 opencodex와 투명하게 연결됩니다:
+사용하는 도구에 해당하는 안내를 선택하세요. 여러 도구를 연결할 수 있으며 프로바이더와 모델은 공유됩니다.
+
+### Codex
+
+1단계에서 Codex 프롬프트를 수락했다면 이제 Codex가 opencodex와 투명하게 통신합니다. 프롬프트를 거절했거나 기존 설정이 있어 설정이 종료됐다면 Codex를 실행하기 전에 대시보드 **Connect** 페이지의 Codex 스위치를 켜세요. [Codex 통합](/ko/guides/codex-integration/)에서 변경 내용과 복원 방법을 설명합니다.
 
 ```bash
 codex "Refactor this function for readability"
@@ -67,6 +80,42 @@ codex "Refactor this function for readability"
 codex -m "anthropic/claude-opus-5" "Explain this stack trace"
 codex -m "ollama-cloud/glm-5.2"      "Write a SQL migration"
 ```
+
+### Claude Code
+
+`claude` CLI가 설치된 상태에서:
+
+```bash
+ocx claude
+```
+
+`ocx claude`는 프록시가 실행 중이 아니면 시작하고 opencodex를 가리키는 환경으로 Claude Code를 실행합니다. 추가 인수는 그대로 전달됩니다. 계층 기본값, 다른 실행기와 사용 중지 방법은 [Claude Code](/ko/guides/claude-code/)를 참조하세요.
+
+### Claude Desktop
+
+```bash
+ocx claude desktop
+```
+
+새로 설치할 때는 앱 전체에 게이트웨이 프로필을 설정합니다. 이미 first-party 모드를 사용하는 설치는 해당 모드를 유지하며, `ocx claude desktop apply --gateway`를 실행해 명시적으로 전환할 수 있습니다. Desktop은 claude.ai를 유지하고 Code 탭만 라우팅하는 first-party 모드는 [Claude Code](/ko/guides/claude-code/)의 Claude Desktop 모드 항목을 참조하세요.
+
+모드를 전환한 뒤에는 Claude Desktop을 완전히 종료했다가 다시 여세요.
+
+### Grok Build
+
+로컬 리스너에서 `~/.grok`이 존재하면 `ocx start`가 표시되는 모델을 `~/.grok/config.toml`에 등록합니다. Grok Build에서 `ocx-*` 모델을 선택하세요. 원격 설정과 관리 블록은 [Grok Build](/ko/guides/grok-build/)를 참조하세요.
+
+프로바이더나 모델을 추가한 뒤에는 `ocx ensure`를 실행하거나 프록시를 재시작해야 Grok Build에 반영됩니다.
+
+### 다른 도구
+
+관리형 통합이 있는 도구(OpenCode, Pi, Qoder, WorkBuddy, Kilo, Cline, T3 Code 등)는 대시보드의 **Connect** 페이지에서 연결하거나 다음을 사용하세요:
+
+```bash
+ocx integration client enable --client <id>
+```
+
+각 도구의 설정 파일과 적용 시점은 [통합](/ko/guides/integrations/)을 참조하세요. 사용자 지정 엔드포인트를 지원하는 다른 도구는 OpenAI 호환 기본 URL `http://localhost:10100/v1` 또는 Anthropic 기본 URL `http://localhost:10100`을 사용할 수 있습니다.
 
 ## Sub-agent 모델 선택(선택 사항)
 

@@ -2,7 +2,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { DEFAULT_CATALOG_PATH } from "../codex/paths";
 import { codexSupportedReasoningEfforts } from "../codex/catalog/effort";
 import { isPrivateLanHttpOrigin } from "../lib/hub-transport";
-import { resolveCodexRuntime } from "../codex/runtime";
+import { resolveCodexRuntime, type ResolvedCodexRuntime } from "../codex/runtime";
 import {
   inspectClientCatalogReadiness,
   type CatalogCompatibilityDeps,
@@ -17,15 +17,18 @@ import {
 } from "../client/connect";
 import { inspectClientRotationRecoveryGate, readClientConnectionState } from "../client/state";
 import { readClientLinkState } from "../client/link-state";
+import { probeLinkTunnelStatus, type LinkTunnelStatus } from "../client/link-tunnel-status";
 import { teardownClientLink } from "../client/link-teardown";
 import { reapOrphanTunnel } from "../client/link-tunnel";
 import { readServiceApiTokenState } from "../lib/service-secrets";
 import type { ClientLifecycleLockDeps } from "../client/lifecycle-lock";
+import { recoverOrphanedTokens, type OrphanTokenRecoveryDeps } from "../client/orphan-token-recovery";
 import { linkKnownHostsPath } from "../link/paths";
 import { createSshRunner, type SshRunner } from "../link/ssh-runner";
 import type { OrphanTunnelResult } from "../client/link-tunnel";
 import { inspectRemoteDesktopStore } from "../claude/desktop-remote-store";
 import type { OcxConnectedClientId } from "../types";
+import { ROUTE_CLIENT_IDS, isRouteClientId } from "../link/route-intent";
 import {
   CliUsageError,
   csv,
@@ -55,25 +58,27 @@ export interface ClientCommandDeps extends RuntimeApiDeps {
     knownHostsFile?: string;
     timeoutMs?: number;
   };
+  /** Injected in tests; defaults to asking the running Child's /readyz. */
+  probeLinkTunnel?: () => Promise<LinkTunnelStatus>;
 }
 
 export interface ClientCatalogProbeDeps extends CatalogCompatibilityDeps {
   /** Injected in tests; defaults to reading the materialized client catalog off disk. */
   readCatalogBody?: () => string | null;
   /**
-   * A Codex command the caller already resolved, handed over so readiness skips resolving it
+   * The Codex runtime the caller already resolved, handed over so readiness skips resolving it
    * again. General `ocx status` resolves the full runtime for its diagnostics block; the resolver
    * memo is keyed by discovery scope and holds one entry, so a priority-only readiness resolve
    * and the full one miss each other and re-probe the same command with `--version` — up to eight
-   * seconds apiece. Passing the command across adds no cache state, and it cannot disagree with
+   * seconds apiece. Passing the selection across adds no cache state, and it cannot disagree with
    * what status prints because it is the selection status is printing.
    */
-  selectedCodexCommand?: string;
+  selectedCodexRuntime?: ResolvedCodexRuntime;
 }
 
 export const CONNECT_USAGE = `Usage:
   ocx connect --link --key-stdin --tunnel-port <port> --link-id <id>
-      [--clients codex,claude] [--catalog-timeout <seconds>] [--no-sync]
+      [--clients <id,...>] [--catalog-timeout <seconds>] [--no-sync]
   ocx connect <url> [--management-url <url>]
       (--pairing-code-stdin | --admin-token-stdin)
       [--clients codex,claude] [--management-transport direct|relay]
@@ -81,10 +86,12 @@ export const CONNECT_USAGE = `Usage:
   ocx connect status [--json]
   ocx connect rotate (--pairing-code-stdin | --admin-token-stdin)
       [--json]
-  ocx connect revoke --admin-token-stdin [--json]`;
+  ocx connect revoke --admin-token-stdin [--json]
+  Link client ids: ${ROUTE_CLIENT_IDS.join(", ")}`;
 
 export const DISCONNECT_USAGE = `Usage:
-  ocx disconnect [--keep-catalog] [--json]`;
+  ocx disconnect [--keep-catalog] [--recover-config --yes] [--json]
+  ocx disconnect --orphaned-token --yes [--json]`;
 
 export type ClientConnectionStatus = {
   state: "disconnected" | "connected" | "invalid" | "mismatched";
@@ -118,6 +125,12 @@ export type ClientConnectionStatus = {
   readiness?: ClientCatalogReadiness["kind"];
   /** Present whenever readiness is not `ready`; names the fault and the way out. */
   readinessReason?: string;
+  /**
+   * A Remote Link Child's tunnel as its running runtime sees it (#8470). `state: "connected"` is
+   * the durable link record; this says whether a request can cross it now. Additive, and only on
+   * `ocx connect status` for `transport: "link"`.
+   */
+  linkTunnel?: LinkTunnelStatus;
 };
 
 function readInstalledCatalogBody(): string | null {
@@ -138,12 +151,14 @@ function readInstalledCatalogBody(): string | null {
  * to the catalog probe: readiness does not consume alternative-runtime diagnostics. The resolver
  * keeps this priority-only cache separate from the full discovery used by `ocx status`.
  *
- * A caller that has already resolved passes its selection in through `selectedCodexCommand` rather
+ * A caller that has already resolved passes its selection in through `selectedCodexRuntime` rather
  * than paying for a second `--version` probe of the command it just resolved.
  */
-function observeLocalCodexEffortLadder(selected?: string): ReadonlySet<string> | null {
-  const command = selected ?? resolveCodexRuntime({ discoverAlternatives: false }).runtime.command;
-  return codexSupportedReasoningEfforts({ commandCandidates: () => [command] });
+function observeLocalCodexEffortLadder(selected?: ResolvedCodexRuntime): ReadonlySet<string> | null {
+  const runtime = selected ?? resolveCodexRuntime({ discoverAlternatives: false }).runtime;
+  // The selection travels with its command so the probe can tell an unresolved sentinel, which may
+  // fall back to the ChatGPT.app CLI on macOS (#8360), from a bare command that actually ran.
+  return codexSupportedReasoningEfforts({ commandCandidates: () => [runtime.command], selectedRuntime: runtime });
 }
 
 /**
@@ -153,8 +168,8 @@ function observeLocalCodexEffortLadder(selected?: string): ReadonlySet<string> |
  * would run its own probe, which is how the two checks could disagree about the ladder within
  * a single `ocx connect`.
  */
-function catalogObserver(deps: ClientCatalogProbeDeps | undefined): CatalogCompatibilityDeps {
-  const selected = deps?.selectedCodexCommand;
+export function catalogObserver(deps: ClientCatalogProbeDeps | undefined): CatalogCompatibilityDeps {
+  const selected = deps?.selectedCodexRuntime;
   return { supportedEfforts: deps?.supportedEfforts ?? (() => observeLocalCodexEffortLadder(selected)) };
 }
 
@@ -239,8 +254,8 @@ export function collectClientConnectionStatus(
 
 function parseClients(raw: string | undefined): OcxConnectedClientId[] {
   const values = csv(raw) ?? ["codex", "claude"];
-  if (values.length < 1 || values.some(value => value !== "codex" && value !== "claude")) {
-    throw new CliUsageError("--clients must contain codex and/or claude", CONNECT_USAGE);
+  if (values.length < 1 || values.some(value => !isRouteClientId(value))) {
+    throw new CliUsageError(`--clients must contain route client ids: ${ROUTE_CLIENT_IDS.join(", ")}`, CONNECT_USAGE);
   }
   return values as OcxConnectedClientId[];
 }
@@ -339,7 +354,26 @@ export function connectCompletionReport(
   };
 }
 
-function statusLines(status: ClientConnectionStatus): string[] {
+/**
+ * Adds the tunnel verdict (#8470) only for a connected Remote Link Child, the one case with a
+ * runtime verdict to read; a hub client or a disconnected machine is returned untouched, unprobed.
+ */
+export async function withLinkTunnelStatus(
+  status: ClientConnectionStatus,
+  probe: () => Promise<LinkTunnelStatus>,
+): Promise<ClientConnectionStatus> {
+  if (status.state !== "connected" || status.transport !== "link") return status;
+  // An optional diagnostic: a probe that fails must not take the durable status down with it.
+  let linkTunnel: LinkTunnelStatus;
+  try { linkTunnel = await probe(); } catch { linkTunnel = { state: "unknown", reason: "runtime_unreadable" }; }
+  return { ...status, linkTunnel };
+}
+
+function linkTunnelLine(tunnel: LinkTunnelStatus): string {
+  return tunnel.state === "up" ? "Link tunnel: up" : `Link tunnel: ${tunnel.state} (${terminalSafeText(tunnel.reason)})`;
+}
+
+export function clientConnectionStatusLines(status: ClientConnectionStatus): string[] {
   if (status.state !== "connected") {
     return [`Connection: ${status.state}${status.reason ? ` (${status.reason})` : ""}`];
   }
@@ -348,6 +382,8 @@ function statusLines(status: ClientConnectionStatus): string[] {
     // Second line on purpose. The whole of #4207 is that a reader stopped at "connected" and
     // believed the client was usable, so the local verdict has to arrive before the hub detail.
     readinessLine(status),
+    // #8470: the same holds for a link Child whose tunnel is down; say so before the detail.
+    ...(status.linkTunnel ? [linkTunnelLine(status.linkTunnel)] : []),
     `Transport: ${status.transport ?? "hub"}`,
     ...(status.link ? [`Link: ${status.link.linkId} via tunnel port ${status.link.tunnelPort}`] : []),
     `Hub: ${status.serverUrl}`,
@@ -390,6 +426,9 @@ async function runHubConnect(argv: string[], deps: ClientCommandDeps): Promise<v
   const managementUrl = takeOption(args, "--management-url");
   if ([serverUrl, managementUrl].some(url => url && isPrivateLanHttpOrigin(url))) console.error("Warning: private LAN HTTP is unencrypted; network peers may read credentials and request content. Use only a trusted LAN.");
   const clients = parseClients(takeOption(args, "--clients"));
+  if (clients.some(client => client !== "codex" && client !== "claude")) {
+    throw new CliUsageError("Hub connections support only codex and claude; use Link for other clients", CONNECT_USAGE);
+  }
   const catalogTimeoutSeconds = takeIntegerOption(args, "--catalog-timeout", { min: 1 });
   if (catalogTimeoutSeconds !== undefined && catalogTimeoutSeconds > 120) {
     throw new CliUsageError("--catalog-timeout must be an integer between 1 and 120", CONNECT_USAGE);
@@ -431,9 +470,9 @@ async function runHubConnect(argv: string[], deps: ClientCommandDeps): Promise<v
   // only the first half is what #4207 was filed for, so the catalog now on disk is checked
   // against the Codex CLI that will read it.
   const readiness = inspectInstalledCatalogReadiness(installedCatalogFileState(), deps.catalogProbeDeps ?? {});
-  const report = connectCompletionReport(connection, clients, readiness);
+  const report = connectCompletionReport(connection, connection.selectedClients, readiness);
   for (const line of report.lines) console.log(line);
-  printCodexShimReadiness(clients);
+  printCodexShimReadiness(connection.selectedClients);
   if (report.failure) throw new Error(report.failure);
 }
 
@@ -446,7 +485,8 @@ async function runLinkConnect(argv: string[], deps: ClientCommandDeps): Promise<
   const managementTransport = takeOption(args, "--management-transport");
   const pairing = takeFlag(args, "--pairing-code-stdin");
   const admin = takeFlag(args, "--admin-token-stdin");
-  const clients = parseClients(takeOption(args, "--clients"));
+  const rawClients = takeOption(args, "--clients");
+  const clients = parseClients(rawClients);
   const catalogTimeoutSeconds = takeIntegerOption(args, "--catalog-timeout", { min: 1 });
   if (catalogTimeoutSeconds !== undefined && catalogTimeoutSeconds > 120) {
     throw new CliUsageError("--catalog-timeout must be an integer between 1 and 120", CONNECT_USAGE);
@@ -468,6 +508,7 @@ async function runLinkConnect(argv: string[], deps: ClientCommandDeps): Promise<
     managementUrl: `http://127.0.0.1:${rawPort}`,
     credential: { kind: "link", ...credential },
     selectedClients: clients,
+    selectedClientsExplicit: rawClients !== undefined,
     managementTransport: "direct",
     transport: "link",
     link: { tunnelPort: rawPort, linkId },
@@ -481,9 +522,9 @@ async function runLinkConnect(argv: string[], deps: ClientCommandDeps): Promise<
     throw terminalSafeError(error);
   });
   const readiness = inspectInstalledCatalogReadiness(installedCatalogFileState(), deps.catalogProbeDeps ?? {});
-  const report = connectCompletionReport(connection, clients, readiness);
+  const report = connectCompletionReport(connection, connection.selectedClients, readiness);
   for (const line of report.lines) console.log(line);
-  printCodexShimReadiness(clients);
+  printCodexShimReadiness(connection.selectedClients);
   if (report.failure) throw new Error(report.failure);
 }
 
@@ -513,8 +554,11 @@ export async function handleConnectCommand(argv: string[], deps: ClientCommandDe
       const args = argv.slice(1);
       const wantsJson = takeFlag(args, "--json");
       rejectArgs(args, CONNECT_USAGE, { redactValues: true });
-      const status = collectClientConnectionStatus(Date.now(), deps.lifecycleLockDeps, deps.catalogProbeDeps ?? {});
-      printData(status, wantsJson, statusLines(status));
+      const status = await withLinkTunnelStatus(
+        collectClientConnectionStatus(Date.now(), deps.lifecycleLockDeps, deps.catalogProbeDeps ?? {}),
+        deps.probeLinkTunnel ?? probeLinkTunnelStatus,
+      );
+      printData(status, wantsJson, clientConnectionStatusLines(status));
       return;
     }
     if (argv[0] === "revoke") {
@@ -531,13 +575,28 @@ export async function handleConnectCommand(argv: string[], deps: ClientCommandDe
 
 export async function handleDisconnectCommand(
   argv: string[],
-  deps: Pick<ClientCommandDeps, "lifecycleLockDeps" | "linkTeardownDeps"> = {},
+  deps: Pick<ClientCommandDeps, "lifecycleLockDeps" | "linkTeardownDeps"> & { orphanRecoveryDeps?: OrphanTokenRecoveryDeps } = {},
 ): Promise<number> {
   return runCliAction(async () => {
     const args = [...argv];
     const keepCatalog = takeFlag(args, "--keep-catalog");
     const wantsJson = takeFlag(args, "--json");
+    const orphanedToken = takeFlag(args, "--orphaned-token");
+    const recoverConfig = takeFlag(args, "--recover-config");
+    const yes = takeFlag(args, "--yes");
     rejectArgs(args, DISCONNECT_USAGE, { redactValues: true });
+    if (recoverConfig && (!yes || orphanedToken)) throw new CliUsageError("--recover-config requires --yes and cannot be combined with --orphaned-token", DISCONNECT_USAGE);
+    if (orphanedToken) {
+      if (!yes || keepCatalog) throw new CliUsageError("--orphaned-token requires --yes and cannot be combined with --keep-catalog", DISCONNECT_USAGE);
+      const backup = await recoverOrphanedTokens({ ...deps.orphanRecoveryDeps, lifecycleLockDeps: deps.lifecycleLockDeps });
+      const restore = "Stop OpenCodex and move the saved files back into its config directory only if the destination names are absent.";
+      printData({ ...backup, restore }, wantsJson, [
+        `Preserved token files in ${backup.backupDir}.`,
+        `To restore: ${restore}`,
+      ]);
+      return;
+    }
+    if (yes && !recoverConfig) throw new CliUsageError("--yes requires --orphaned-token or --recover-config", DISCONNECT_USAGE);
     const teardown = await teardownClientLink({
       readSidecar: readClientLinkState,
       connectedLinkId: () => {
@@ -551,7 +610,20 @@ export async function handleDisconnectCommand(
       knownHostsFile: deps.linkTeardownDeps?.knownHostsFile ?? linkKnownHostsPath(),
       timeoutMs: deps.linkTeardownDeps?.timeoutMs,
     });
-    const result = await disconnectClient({ keepCatalog }, deps);
+    const result = await disconnectClient({ keepCatalog, recoverConfig }, deps).catch((error: unknown) => {
+      // The bare code left a Home-driven leave with nothing to act on; the remedy already exists.
+      if (error instanceof Error && error.message === "client_catalog_ownership_changed") {
+        throw new Error("client_catalog_ownership_changed: the Codex model catalog (opencodex-catalog.json in the Codex home) matches neither the catalog this connection wrote nor the one recorded before it connected, so something changed it after connecting and disconnect will not overwrite it. To disconnect and leave that file as it is, run: ocx disconnect --keep-catalog");
+      }
+      throw error;
+    });
+    if (result.nativeIntentOnly) {
+      printData(result, wantsJson, [
+        "Not connected; restored the standalone native switches an interrupted Remote Link enrollment had changed.",
+        ...(result.tokenRemoved ? ["Removed the service token that enrollment left behind."] : []),
+      ]);
+      return;
+    }
     const payload = {
       ...result,
       homeRevoke: teardown.homeRevoke,
@@ -563,6 +635,7 @@ export async function handleDisconnectCommand(
     };
     printData(payload, wantsJson, [
       "Disconnected locally; native Codex state was restored.",
+      ...(result.recoveryBackupDir ? [`Codex recovery snapshot: ${result.recoveryBackupDir}/snapshot.json (private; retained for manual inspection).`] : []),
       ...(result.desktopRestoration === "standard_fallback"
         ? ["Previous Desktop settings were not recorded; the managed profile was switched to standard mode."] : []),
       ...(result.restartRequired ? ["Fully quit and reopen Claude Desktop; local cleanup cannot revoke an in-memory credential."] : []),

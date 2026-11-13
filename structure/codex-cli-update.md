@@ -17,6 +17,10 @@ npm resolver. The resolver replaces all ambient aliases with the captured entrie
 project dotenv cannot supply missing settings or change the captured precedence.
 An older snapshot without a transport map conveys no transport settings, with no
 ambient fallback. Snapshot values are internal inputs, never report or diagnostic fields.
+For orchestrated OpenCodex updates the launcher intercepts plan/apply before desktop
+handoff and boot restoration, resolves Bun without installation, and delegates npm/pnpm
+apply to the Node driver. The [update transaction contract](ops/service-and-sidecars.md#bun-updater-ownership-transaction) owns admission and verification.
+For `sync`, the launcher acquires the home sync/update mutex before Desktop handoff or Bun launch and holds it until that child exits. A current Bun child reuses the lease only when its recorded live sync holder is its parent and the launcher pid matches the inherited claim; old Desktop CLIs remain protected by the launcher lease.
 Registry integrity requires a canonical base64 SHA-512 digest of exactly 64 bytes; malformed or truncated tokens refuse the target.
 Plan identity also binds a bounded content observation (installContentDigest): a versioned file set
 fixed by the supported npm-global layout — the package manifest, its declared bin/codex.js
@@ -94,6 +98,10 @@ PATH-only candidate selection, autostart wrappers, global/vendor fallback,
 app/Store/MSIX bundles and version-manager ownership remain unverified and unmanaged.
 The explicit `attest` report stays observation-only. Only the production plan predicate
 creates private plan evidence; copying a public report cannot enable Windows planning.
+Refusals retain fixed gate codes and available native/derivation reason codes in a report-keyed
+WeakMap, exposed only by `windowsCodexCliPlanRefusalForTests` for regression failure messages.
+These diagnostics contain no paths or exception text, do not serialize with the report, and
+do not change managed status, content digests, private plan evidence or fail-closed decisions.
 This observes linkage and content, not publisher authenticity or a whole-tree guarantee.
 The fresh-source Worker case in `tests/codex-integration/codex-cli-windows-plan.test.ts`
 rebuilds private evidence through the native inspector inside that realm before resolving
@@ -217,11 +225,14 @@ not npm's exit code. Version uses the pinned Node with the verified JS entrypoin
 then repeats selection/content observation; it does not attest arbitrary future CMD lookup.
 Cleanup errors remain separate from the result. The existing job execution layer retries result
 persistence without repeating installation. No automatic rollback or stale-lock recovery exists.
-`tests/codex-integration/codex-cli-update-windows-apply.test.ts` covers real offline npm in private
-shared fixtures, unrelated package/shim preservation, terminal close failure, partial mutations,
-absence, selection, unknown retention, async pins and persistence retry. One JS launcher executes
-a compiled CLR x64 backing fixture that verifies Job membership and returns the version. This is
-executable-fixture evidence, not a run of the vendor Codex product.
+`tests/codex-integration/codex-cli-update-windows-apply.test.ts` covers authority and toolchain pins.
+Its siblings `tests/codex-integration/codex-cli-update-windows-apply-install.test.ts`,
+`tests/codex-integration/codex-cli-update-windows-apply-outcomes.test.ts` and
+`tests/codex-integration/codex-cli-update-windows-apply-shared.test.ts` cover real offline npm,
+partial mutations, retention, persistence retry, unrelated package/shim preservation and terminal
+close failure. `tests/helpers/codex-cli-windows-apply-fixture.ts` keeps cleanup ownership per file.
+One JS launcher executes a compiled CLR x64 backing fixture that verifies Job membership and
+returns the version. This is executable-fixture evidence, not a run of the vendor Codex product.
 
 ## Explicit POSIX apply
 
@@ -335,7 +346,11 @@ keeps the run-once handler installed. Only successful terminal cleanup removes t
 its token. No polling, automatic retry/reap or termination follows from retention; a retained realm
 can remain resident until separately authorized recovery. A crash still loses in-memory ownership
 and leaves durable state unknown. The pure lifetime test is not native disposal evidence.
-Authority release succeeds only when lock disposal is verified and its pin set is empty.
+Authority disposal is proved only after identity/token-fenced lock removal, absent staging and
+an empty pin set. Its `resourcesReleased` evidence is separate from release's ACL diagnostic.
+Disposal follows the original held objects' deletion, even if the pathname is unreadable or replaced.
+Apply preserves that diagnostic in cleanup errors, but releases the execution token once staging,
+toolchain and authority disposal are all proved, including during terminal recovery.
 A failed CloseHandle stays in the apply-only `WindowsApplyAuthorityPins` set; its closeAll skips
 failed closes instead of retrying or forgetting them, preserving Owner/token with `lease_release_unverified`.
 The ordinary ledger/status PinSet keeps its pre-existing best-effort disposal contract; this change
@@ -357,7 +372,7 @@ synchronous worker section, signal-based cancellation alone is not equivalent an
 worker path's only channel.
 
 The worker's final window is also serialized against the parent's own selection mutations through one
-process-wide gate cell. The gate covers exactly seven parent operations: `persistCodexRuntime` and
+process-wide gate cell. The gate covers seven parent mutation boundaries: `persistCodexRuntime` and
 `clearPersistedCodexRuntime` in `src/codex/runtime.ts` (busy refusal — the
 `codex_cli_selection_busy` error — before mkdir, cache invalidation or the swallowing unlink catch),
 the three public shim boundaries (`src/codex/shim-overlay.ts` on POSIX, `src/codex/shim.ts` on Windows; install, auto-restore, uninstall —
@@ -367,8 +382,10 @@ lock and journal mutation), the remote-workspace app-server `Bun.spawn` in
 cleanup a spawn throw runs, so a rejected bridge stop cannot skip isolation removal), and
 `src/codex/desktop-app-restart.ts` (busy returns the new `selection_mutation_busy` skipped reason
 before the restart lock, package discovery, any app quit and the handoff, so a queued relaunch — and
-its own lock-acquisition failure — cannot slip inside the window). Writers never wait: the commit
-window spans the final process scan through terminal installer evidence and readback. Windows also
+its own lock-acquisition failure — cannot slip inside the window). Gate contention refuses immediately: the commit
+window spans the final process scan through terminal installer evidence and readback. Windows directory
+observations retain bigint device/inode identities, including the second namespace check after
+asynchronous ACL/file observations. Windows also
 renews full authority ACL/identity, inspector and full scoped preimage after acquisition, then performs
 the final process scan, synchronous held-identity/selection/cancellation checks, CAS and synchronous
 native Create/Assign/Resume with no intervening await. Windows retains the gate through native Job
@@ -387,6 +404,32 @@ not bound time held. A synchronous
 parent writer must not park the event loop behind it, so a held gate is an immediate busy. The gate is
 one cell for the whole process rather than per-configDir because alias, junction and case spellings of
 the same target must not split the exclusion; a writer on a different configDir can also see busy.
+Async parent callers reserve a unique gate owner before checking recovery and await Windows ACL
+reads and required recovery publication without blocking the parent on PowerShell. The native sync
+and async drivers share the same pinned ancestry, private-DACL, content and publication protocol;
+the async driver rechecks held identities after each ACL/hardening await. Recovery verdicts are never
+cached. A denied, failed or cancelled check releases only its own generation after that check settles.
+The lease's synchronous commit scope admits nested compatibility writers only for the inspected
+resolved config root and the still-held owner. It ends before queued work can run. Existing sync
+exports and Worker arming retain synchronous checks; a direct sync call outside that scope does not
+inherit an earlier async verdict. Ordinary atomic secret-file publication and native feature commands
+retain their synchronous leaf contracts; the nonblocking guarantee covers recovery admission. CLI,
+machine API, restart and Remote Workspace callers use the async
+entry points. Runtime publication rechecks selection inputs, cache epoch, cancellation and caller
+currentness after recovery. Automatic v1 injection uses the same async admission before its config
+lock when the global v2 flag needs disabling. Its synchronous feature-transition commit permits
+nested runtime-pin writes while excluding the update worker; already-v1 no-ops acquire no lease,
+and a newly enabled flag without admission refuses retryably before spawning.
+The injection releases admission after config commit or rollback, including config-lock acquisition
+failure, before its history worker starts. The feature transition retains the shared artifact preimage.
+Codex feature-setting callers acquire admission before their synchronous
+transition; management also holds it across single-feature command preparation, config-lock waits and child execution, and across config-root hardening, then rechecks its mode plan and
+commits in the existing no-await callback. Refusal precedes combined setting writes and returns a
+retryable `codex_cli_selection_busy` response. Diagnostics classify a held async parent by its exact
+buffer and owner, so it cannot appear as a retained Worker. Portable gate/caller regressions and
+Windows-native async ACL regressions live in `tests/codex-integration/codex-cli-update-parent-async.test.ts`;
+`tests/codex-integration/codex-cli-update-windows-pending.test.ts` covers async pending-child publication
+and flush, hardening, rename and readback refusal under the same protocol.
 The gate's holder word carries a unique generation; release compares that exact owner, so an obsolete
 observer cannot clear a later window. An installer/verifier with unconfirmed terminal state retains the
 gate as well as lease/staging. `src/codex/cli-update-worker-recovery.ts` observes worker close: a fence
@@ -414,7 +457,7 @@ proof is also required after restart: name disappearance alone cannot prove desc
 Observer failure leaves armed evidence fenced. Normal settlement also joins the observer before
 staging cleanup. Its HOME/profile/AppData, compiler temp and PowerShell analysis-cache paths all
 resolve inside that private staging root. Access/query failure, missing identity and
-armed or partial publication remain fenced. Parent admission additionally requires owner-process
+unproven armed or partial publication remain fenced. Parent admission additionally requires owner-process
 absence; same-process closed-worker recovery first seals its exact generation against another spawn.
 No recovery probe signals an installer. Terminal markers release only the proven token; alias homes
 read the same canonical store. The native-child restart regressions live in
@@ -431,27 +474,49 @@ renaming or changing the job receipt. It must pass the same private/no-follow fi
 token, carry a null child group, and match the published record's parent identity when present. Fresh
 parent absence and any published child's whole-group absence are required. Every unshadowed pending
 file must independently satisfy these checks; malformed, armed, foreign or unsafe evidence stays fenced.
+On Windows, a complete pending child may instead replace its published armed authority through the
+same protected flush, ACL verification and atomic rename path, retaining the pending file until rename.
+Both records must match token, parent
+PID and Job name; the armed PID/creation time must be null and the child identity complete. Publication
+requires parent absence, a matching terminal guardian proof, exact child lifetime absence/reuse and a
+fresh absent/zero-active Job check. Any read, validation or publication failure keeps admission fenced.
+Guardian death before terminal proof remains fenced, even when the primary and named Job are absent.
 Admission re-probes non-terminal lifetime evidence on every attempt, so later group exit is observed
 without retaining a pre-restart observer or caching a stale refusal.
 Absent recovery history admits ordinary callers, including a symlinked config home or ancestor.
 Existing evidence is read through the canonical home target with its trusted ancestry; a linked recovery
 store, unsafe target, or evidence that becomes unreadable stays fenced. Updater mutation eligibility
 retains its stricter canonical/no-alias policy. EPERM, unrelated malformed/partial records,
-and an armed record with no published child stay closed for
+and an armed record without a safely reconcilable child stay closed for
 operator inspection. PID reuse can delay recovery but cannot prove absence. The protected durable job
 ledger keeps its existing ambiguous result; fence recovery neither retries installation nor converts it
 to success. Abandoned installation-prefix leases and staging after process death are not reclaimed by
 this admission recovery. Old jobs lacking recovery records retain their existing unknown-state projection.
-Ordinary config writes, account operations, model requests, existing session interrupt/close and
+Unrelated config writes, account operations, model requests, existing session interrupt/close and
 arbitrary subprocesses are not gated. The gate claims nothing about processes the parent does not own:
 an external installer, a handoff helper's delayed descendants, or an OS-level snapshot race stays the
 documented residual it always was.
 
 `bin/ocx.mjs` includes the proof-bound Codex candidate snapshot for the published `start` command as well as the updater commands; this makes the production management plan work without accepting request-supplied candidate evidence. `src/codex/cli-update-inspection-context.ts` is the shared bridge from that Node snapshot to the installer inspector. Direct Bun/source launches have no trusted candidate and fail closed; neither path reconstructs write targets from display data. `src/codex/cli-update-job.ts` owns the bounded durable admission ledger shared by CLI and management. Request IDs are scoped to the protected config root and payload digest; exact retries return the same opaque job, conflicts refuse, and a full ledger refuses new admission. Every store operation requires a canonical same-owner config parent with safe write permissions and canonical ancestry to filesystem root; each ancestor must be owned by root or the current user, and shared-writable ancestors are refused unless root-owned and sticky. Only confirmed apply admission may create one absent config-root level, which is revalidated as owner-private. Plan and status reads never create it, and an existing root must pass the same canonical/no-link checks. This path-based ancestry check prevents untrusted other-user writable ancestors from redirecting store operations; it does not defend against concurrent tampering by the same user or root. Atomic updates use a private same-owner POSIX directory, no-follow reads and a short exclusive lock. Unresolved records are not expired. An in-process generation and revision own completion writes; after restart a queued/running record projects as `ambiguous` with `owner_state_unknown`, without claiming the old owner stopped. A `retained` lease state requires an execution reason that proves acquisition and intentional preservation; synthetic job errors, unverified release and release exceptions project as `unknown`. The path-free DTO separates owner state, installer child state, lease retention and overall lifetime uncertainty with fixed outcome/reason/cleanup codes.
 
-`src/cli/codex-cli-update.ts` records confirmed CLI apply in that ledger and exposes `status <job-id>` from the same protected record, without requiring a GUI token. `src/server/management/codex-cli-update-routes.ts` exposes a proof-bound read-only plan, confirmed human dashboard session (`hasHumanDashboardSession`) plus trusted-loopback apply admission, and authenticated status. Plan and job reads use ordinary management admission. HTTP apply returns after durable admission; disconnect does not cancel the worker. Dashboard display data is never accepted back as a candidate, prefix, executable or managed-selection attestation. There is no dashboard job UI in this contract. `tests/server/persistent-dashboard-consent.test.ts` covers management admission and the apply service boundary.
+`src/cli/codex-cli-update.ts` records confirmed CLI apply in that ledger and exposes `status <job-id>` from the same protected record, without requiring a GUI token. `src/server/management/codex-cli-update-routes.ts` exposes a proof-bound read-only plan, confirmed apply from a current paired dashboard session on trusted-loopback ingress, and authenticated status. Apply requires both `hasHumanDashboardSession` and `sessionControl.isPaired`; an automatically issued loopback session, remembered-admin session, raw admin token or Tailscale-identity session does not suffice. Origin, CSRF and `confirmed: true` checks remain required. Plan and job reads use ordinary management admission. HTTP apply returns after durable admission; disconnect does not cancel the worker. Dashboard display data is never accepted back as a candidate, prefix, executable or managed-selection attestation. The dashboard consumer is `gui/src/pages/codex-cli-update.tsx` (Codex → Codex CLI, #2811) over `gui/src/codex-cli-update-api.ts`: Check reads the plan only on request; Apply is offered only when `applicable`, `refusal === null` and a `planId` are present and the operator ticked the confirmation, and posts exactly that `planId` with one `requestId`, resent only after `job_store_busy`, `admission_failed`, a network failure, or a 403 that the operator resolved by pairing; the ledger returns any job already admitted for that id and plan, so a resend cannot admit a second job. `idempotency_conflict`, store refusals and any other refusal are final for that attempt. A new Check or another server discards the plan, the confirmation and the `requestId`; a session change clears the confirmation. A stopped poll re-enables Check. The job is polled until its status is final with no active owner; `job_not_found` stops, five consecutive unreadable reads stop with the CLI `status` command, and an ambiguous result is never retried. A 403 shows the local pairing form and the CLI apply command. A connected Child shows a notice and makes no request, because its machine listener refuses `/api/codex/*` and its shared base is the Home. `gui/tests/codex-cli-update-api.test.ts` and `gui/tests/codex-cli-update-panel.test.tsx` cover it. `tests/server/persistent-dashboard-consent.test.ts` covers refusal and a genuinely issued-and-redeemed local pairing session reaching one apply admission without running an installer.
+
+Standalone pairing requires the configured literal `127.0.0.1` or `::1` loopback origin, as described in [Standalone pairing delivery](remote-link.md#standalone-pairing-delivery). A `localhost` alias, wildcard bind or connected-client role cannot obtain that local pairing authority; remote pairing does not bypass trusted-loopback ingress. Operators without an eligible HTTP pairing path use `ocx system codex-cli-update plan` and `ocx system codex-cli-update apply --plan-id <32-hex> --yes` locally. Pairing establishes protected-home write authority, not human identity or a boundary against unrestricted same-user or elevated processes; the local CLI remains independently available to that owner.
 
 On Windows, `src/codex/cli-update-job-store-windows.ts` maps the same ledger contract onto NTFS handle semantics and the public admit/read/finish API in `src/codex/cli-update-job.ts` dispatches to it asynchronously. Each ancestor from the volume root is opened relative to its already-held parent — never a re-parsed path — and refused on any reparse attribute, then evaluated under the "trusted-ancestry" ACL policy (owner is the serving token or SYSTEM/Administrators/TrustedInstaller; untrusted grantees may hold read and, on admin-owned ancestors only, broad create-only rights). The config-root parent and a pre-existing config root are verified under the "write-private" policy and are never rehardened; only a directory the call itself creates is icacls-hardened and held to the strict "private" rule. File identity is the volume serial plus 128-bit file ID with single link and no pending delete, the dev:ino analog. Ledger writes go through a private hardened temp that is byte/ACL/identity-verified, renamed while its handle is held, re-read through the published name, and flushed at the directory. The admission mutex is a mkdir lock plus an owner record released only while both held pins still show this call identity and content, so a leftover lock blocks later admission exactly like POSIX. ACL snapshots are taken per phase through the shared bounded PowerShell read in `src/lib/windows-owner-acl.ts` (async variant), not per path. Pins bind each object to its verified state for the operation and the private DACL confines writers, but this is not a proof against concurrent mutation by the serving account or an elevated process, which sit inside the trust boundary as on POSIX. The backend is x64-only; cross-account (other-SID) and ARM64 behavior are unverified.
+
+The existing-ancestor policy ignores inherit-only templates; it never authorizes creating a child
+under that ancestor. Every direct creation parent uses "write-private" or the stricter "private"
+policy, rejecting untrusted inherit-only write/create grants before mkdir. This preserves a protected descendant under a volume
+root with broad child templates while refusing the same template on the actual creation parent.
+
+Apply-authority disposal requires successful identity/token-fenced delete-on-close of both original
+lock objects, zero remaining pins and no staging. A replacement at the pathname neither proves nor
+prevents this owner's disposal; failed deletion or close retains its Worker execution token.
+Apply-authority release checks held identity before and after its ACL read. An ACL-only failure
+still attempts deletion through the original token-fenced pins and reports a failed release verdict.
+That verdict alone does not retain the Worker: proved resource disposal permits closure and a later apply.
+Identity failure preserves the lock while closing pins. Repeated release cannot affect a later owner.
 
 Each successful handle-relative `relOpen` registers its handle exactly once before returning it;
 callers use that already-owned handle without wrapping it in another `keep` registration.

@@ -3,6 +3,7 @@ import type { OcxConfig } from "../types";
 import { isHubTransportPermitted as isPairingTransportPermitted } from "../lib/hub-transport";
 import { canonicalGuiBrowserOrigin, standaloneGuiPairingOrigin } from "../lib/gui-pair-capability";
 import { authorizationCredential } from "../lib/authorization-scheme";
+import { desktopGuiBinding, desktopGuiOrigin } from "../lib/desktop-gui-origin";
 import {
   isAllowedManagementOrigin,
   isApiAuthRequired,
@@ -41,6 +42,9 @@ export interface GuiPairingGrantRecord {
   expiresAt: number;
   failedAttempts?: number;
   localPairing?: true;
+  /** Only the signed Desktop route may create this process-local purpose. */
+  desktopPurpose?: true;
+  desktopBinding?: string;
 }
 
 export interface PairingAttemptContext {
@@ -276,9 +280,10 @@ export function createGuiPairingGrant(
   config: OcxConfig,
   state: GuiSessionState,
   now = Date.now(),
+  desktopPurpose = false,
 ): { grant: string; browserOrigin: string; serverOrigin: string; expiresAt: number } {
   const canonicalBrowserOrigin = canonicalGuiBrowserOrigin(browserOrigin);
-  const localOrigin = standaloneGuiPairingOrigin(config);
+  const localOrigin = desktopPurpose ? desktopGuiOrigin(config, browserOrigin) : standaloneGuiPairingOrigin(config);
   const localPairing = localOrigin !== null && canonicalBrowserOrigin === localOrigin;
   const serverOrigin = config.runtimeRole === "hub"
     ? canonicalHttpOrigin(config.hub?.managementPublicOrigin) : localOrigin;
@@ -286,6 +291,7 @@ export function createGuiPairingGrant(
     !canonicalBrowserOrigin
     || canonicalBrowserOrigin !== browserOrigin
     || !serverOrigin
+    || (desktopPurpose && !localPairing)
     || (config.runtimeRole === "hub"
       ? !isRemoteGuiBrowserOriginAllowed(canonicalBrowserOrigin, config) : !localPairing)
   ) throw new TypeError("remote GUI origin is not allowed");
@@ -300,6 +306,7 @@ export function createGuiPairingGrant(
   } while (state.pairingGrants.has(digest));
   const expiresAt = now + GUI_PAIRING_GRANT_TTL_MS;
   state.pairingGrants.set(digest, { browserOrigin: canonicalBrowserOrigin, serverOrigin, expiresAt,
+    ...(desktopPurpose ? { desktopPurpose: true as const, desktopBinding: desktopGuiBinding(config) } : {}),
     ...(localPairing ? { localPairing: true as const } : {}) });
   return { grant, browserOrigin: canonicalBrowserOrigin, serverOrigin, expiresAt };
 }
@@ -377,6 +384,8 @@ export function consumeGuiPairingGrant(
     return attemptContext && !source.allowed ? source : null;
   }
   const [digest, record] = found;
+  // A Desktop grant adds only its own scope to an existing session, never ordinary pairing.
+  if (record.desktopPurpose) return null;
   // A live role/config change must not turn a hub grant into local operator consent, or vice versa.
   if (record.localPairing ? !localOrigin || record.serverOrigin !== localOrigin
     : config.runtimeRole !== "hub") return null;

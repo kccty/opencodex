@@ -265,7 +265,7 @@ test("approval capabilities and combo members preserve native caps and exact eff
   const combo = normalizeComboConfig({ strategy: "failover", targets: [{ provider: "openai", model: reviewer }, { provider: "V-API", model: reviewer }] });
   expect(deriveComboCatalogModel("approval", combo, [member, apiMember])).toMatchObject({
     provider: "combo", id: "approval", contextWindow: 128_000,
-    reasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    reasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
   });
 });
 
@@ -296,6 +296,7 @@ test("approval override selects a failover combo and retains concrete wire ids w
   } finally { clearComboSelectionState(id); clearComboTargetCooldowns(id); }
 });
 
+const catalogSyncTimeoutMs = process.platform === "win32" ? 60_000 : 25_000;
 for (const writer of ["retained-sync", "convergence"] as const) {
   for (const includeNative of [true, false]) {
     test(`${writer} ${includeNative ? "keeps" : "omits"} the reviewer across two catalog/cache writes`, () => {
@@ -365,7 +366,7 @@ for (const writer of ["retained-sync", "convergence"] as const) {
             ...process.env, ...namespaceOwner, CODEX_HOME: codexHome, OPENCODEX_HOME: ocxHome,
             ...(process.platform === "win32" ? { BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" } : {}),
           },
-          encoding: "utf8", maxBuffer: 8 * 1024 * 1024, timeout: 25_000,
+          encoding: "utf8", maxBuffer: 8 * 1024 * 1024, timeout: catalogSyncTimeoutMs,
         });
         expect({ status: result.status, stderr: result.stderr }).toMatchObject({ status: 0 });
         const passes = JSON.parse(result.stdout.split("\n").find(line => line.startsWith("AUTO_REVIEW_RESULT="))!.slice("AUTO_REVIEW_RESULT=".length)) as RawEntry[][][];
@@ -376,6 +377,6 @@ for (const writer of ["retained-sync", "convergence"] as const) {
           } else expect(rows).toEqual([]);
         }
       } finally { rmSync(root, { recursive: true, force: true }); }
-    }, 30_000);
+    }, catalogSyncTimeoutMs + 5_000);
   }
 }

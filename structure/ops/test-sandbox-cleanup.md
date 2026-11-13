@@ -110,6 +110,11 @@ draining producers/reaps and restoring or removing a home. The helper does not r
 fixture-specific cleanup or claim OS ACL coverage for synthetic tests.
 The response-state stalled-runner child proves queue settlement while its synthetic runner remains held, then releases and drains that work before removing its home.
 
+The CC-Switch fixtures in `tests/providers/cc-switch-import.test.ts` close connections with
+uncached prepared statements using `Database.close(true)`. This finalizes those statements and
+releases Windows file handles before unlinking hard-link aliases or removing the fixture home;
+cleanup does not depend on garbage collection. The real-home removal guard remains in force.
+
 `tests/helpers/fixture-teardown.ts` owns management-auth, OAuth live-update, Codex quota-auto-refresh
 case roots (`tests/codex-integration/codex-quota-auto-refresh.test.ts`), and Anthropic instance
 root removal (`tests/helpers/anthropic-instance-fixture.ts`).
@@ -135,3 +140,53 @@ are complete allowlists. Catalog tick children drain their config ACL
 flights/reaps before normal exit. Child work deadlines remain separate from outer test budgets,
 which reserve time for termination and teardown. The shared warm-up regressions exercise a live
 interval after work completes and a descendant retaining stdout after its parent exits.
+
+The completed-drain fixture in `tests/server/system-restart-ownership.test.ts` uses
+`tests/helpers/restart-fixture-processes.ts` before loading the runner. On Windows each entry
+joins a private Job before spawning; descendants inherit membership, including detached
+replacements. Teardown kills through the held Job handle and requires zero active members.
+The PID journal is diagnostic only. On POSIX a private stop file requests self-termination;
+recorded creation identities are used only to observe exit, never to signal journaled PIDs.
+The spawned parent's handle and captured output are joined before home removal; cleanup
+failure retains the home. A controlled foreign process injected at a stale journal PID survives.
+`tests/fixtures/restart-parent-ownership-runner.ts` journals process phases and captures the
+fence probe's output continuously. Failure assertions include that evidence and the replacement
+handoff log, including when the parent is terminated before its probe returns.
+The fixture bundles the product graph once into the recognized source-launch entry before
+spawning. Cold module resolution and transpilation count as setup, not handoff work. The
+18-second handoff watchdog starts after spawn; bundling counts against the outer test budget.
+
+## Git environment isolation
+
+A test process can inherit GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and the rest of git's
+`--local-env-vars` from a hook, `git rebase --exec`, `git bisect run` or a
+`--git-dir/--work-tree` wrapper. Every git command the suite spawns then runs against THAT
+repository whatever its cwd: a fixture's `git init` reinitialises it (writing core.worktree when
+GIT_WORK_TREE is set), `git config` writes its .git/config, and add/commit land in it. A shared
+checkout once gained user.name/user.email from a fixture helper and a core.worktree pointing at a
+deleted temp tree, which re-authored every later commit and broke `--show-toplevel` in every
+linked worktree on that host.
+
+- `scripts/git-repository-env.ts` owns the variable list (git's own `--local-env-vars` plus the
+  numbered GIT_CONFIG_KEY/VALUE pairs). `createIsolatedTestEnvironment` drops them, so a wrapped
+  `bun run test` starts every test process clean. `inspectChangedRun`, the test-layout move/verify
+  tooling, `structure-ssot.ts` and `file-size-ratchet.ts` pass a scrubbed env because each reads a
+  root it was given.
+- `tests/preload.ts` deletes them from process.env and warns with their names. That reaches
+  node:child_process and spread envs only: Bun.spawn / Bun.spawnSync without an `env` option keep
+  the environment the process started with (Bun 1.4.4), so a bare `bun test` cannot be fully
+  cleaned in-process.
+- Hence every test-side git call passes an env from `tests/helpers/git-fixture.ts`:
+  `fixtureGitEnv()` for throwaway repositories (no inherited repository, no system or global
+  config, commit identity in GIT_AUTHOR_*/GIT_COMMITTER_*, so no fixture writes user.* to any
+  config file) or `repositoryGitEnv()` for reads of this checkout (keeps the global config so
+  safe.directory still applies). `initFixtureRepo` writes no config.
+- `tests/helpers/git-config-guard.ts`, armed by the preload for each test file, compares the
+  checkout's common .git/config bytes after every case and, when they change, asks git for
+  core.bare, core.hookspath, core.worktree, user.email and user.name. A changed key fails that
+  case by name (never by value); a missing or unparsable config is reported once. Limits: a change
+  undone before the next check is invisible, another worktree's legitimate change to a guarded key
+  fails one case per worker, and config.worktree is not watched.
+
+Enforced by `tests/ci-workflows/test-git-isolation.test.ts`, whose fixture and script cases were
+red against the pre-fix helpers.

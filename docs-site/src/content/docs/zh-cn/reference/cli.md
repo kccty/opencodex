@@ -17,7 +17,7 @@ opencodex 的 CLI 是 `ocx`。它会根据第一个命令名进行分发；文�
 
 管理命令会通过实时代理的管理 API 往返调用，使用记录下来的运行时端口和身份检查，而不是维护第二条配置路径。已停止或不可达的代理会被表示为 HTTP 503，并导致 CLI 以非零状态退出。明确标注为离线配置操作的命令，则可以在没有实时代理的情况下验证并编辑配置文件。
 
-`check` 不查询注册表，也不运行 Codex。在 POSIX 上，当已发布启动器捕获的环境候选项与运行时解析器选择的规范路径一致时，`selectionAttested` 可以为 `true`；如果关联的 npm-global 软件包清单证明了所有权，`managed` 可以为 `true`。持久化候选项仍不获认证。Windows x64 还支持经证明绑定的绝对路径标准 npm `codex.cmd`，以及由持有句柄绑定的 Node/npm 工具链（存在时为前缀本地，确认不存在时为锚定到启动器架构的已捕获 PATH 对）和已验证的前缀内平台支持组件，并使用拒绝重解析的持有句柄。其他 Windows 布局仍然推迟或不受管理。Windows 的 `managed` 结果仅对观察到的安装布局进行分类：绑定的 Node/npm 是更新器的只读元数据工具链，并不保证后续 `codex.cmd` 调用将解析到哪个解释器。直接通过 Bun 或源码运行时没有启动器证明。`plan` 使用隔离的临时 npm 配置、缓存和日志查询官方注册表，并拒绝活动会话或不完整的进程观测。它不安装软件，也不向进程发送信号。Windows x64 的 apply 要求具有经过验证的私有写入权限的受限 npm 前缀，并保留无关的软件包和 shim；不受支持的已观测布局返回 `applicable: false` 且 `refusal: windows_apply_disabled`；仅 PATH 选择、OpenCodex 自启动包装器和 global/vendor 回退仍然推迟。请参阅[完整命令和拒绝原因（英文）](/reference/cli/agents/#read-only-codex-cli-update-plan)。
+`check` 不查询注册表，也不运行 Codex。在 POSIX 上，当已发布启动器捕获的环境候选项与运行时解析器选择的规范路径一致时，`selectionAttested` 可以为 `true`；如果关联的 npm-global 软件包清单证明了所有权，并且在报告了候选版本时该版本与清单版本一致，`managed` 可以为 `true`。持久化候选项仍不获认证。Windows x64 还支持经证明绑定的绝对路径标准 npm `codex.cmd`，以及由持有句柄绑定的 Node/npm 工具链（存在时为前缀本地，确认不存在时为锚定到启动器架构的已捕获 PATH 对）和已验证的前缀内平台支持组件，并使用拒绝重解析的持有句柄。其他 Windows 布局仍然推迟或不受管理。Windows 的 `managed` 结果仅对观察到的安装布局进行分类：绑定的 Node/npm 是更新器的只读元数据工具链，并不保证后续 `codex.cmd` 调用将解析到哪个解释器。直接通过 Bun 或源码运行时没有启动器证明。`plan` 使用隔离的临时 npm 配置、缓存和日志查询官方注册表，并拒绝活动会话或不完整的进程观测。它不安装软件，也不向进程发送信号。Windows x64 的 apply 要求具有经过验证的私有写入权限的受限 npm 前缀，并保留无关的软件包和 shim；不受支持的已观测布局返回 `applicable: false` 且 `refusal: windows_apply_disabled`；仅 PATH 选择、OpenCodex 自启动包装器和 global/vendor 回退仍然推迟。请参阅[完整命令和拒绝原因（英文）](/reference/cli/agents/#read-only-codex-cli-update-plan)。
 
 有关 Windows x64 安装观察，请参阅 [`attest` 命令](/zh-cn/reference/cli/agents/)。未提供显式路径时，该命令观察由受证明约束的启动器快照识别出的已选候选项；它不授予更新权限，也不证明运行时选择。
 
@@ -34,6 +34,10 @@ opencodex 的 CLI 是 `ocx`。它会根据第一个命令名进行分发；文�
 成功的命令退出码为 0。无效用法、未知命令或资源、API 操作失败，以及必需服务不可用时，退出码都非零。`ocx health` 只有在代理健康时才以 0 退出，找不到健康的代理时以 1 退出，参数无效时以 2 退出，因此可作为服务探针。脚本应检查退出码，而不是解析人类可读输出。
 
 声明需要确认的破坏性删除、导入、额度消耗和更新操作，在非交互用法中都要求 `--yes`。该标志是显式选择加入；省略它时，绝不能在静默情况下确认该操作。
+
+## 恢复明文子代理模式配置
+
+进入实验性明文子代理模式请使用 `ocx v2 mode v2-plaintext --acknowledge-plaintext-agent-messages`。通用的 `config set` 和 `config import` 会拒绝新进入该模式，因为专用命令还会协调原生模式转换。恢复包含 `multiAgentMode: "v2-plaintext"` 的导出配置前，先完成上述确认转换，再导入文件。恢复已经启用的模式、修改其他设置和退出明文模式仍然允许；独立的 `plaintextV2AgentMessages` 首选项不受影响。
 
 ## 版本与内部分发目标
 

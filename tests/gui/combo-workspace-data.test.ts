@@ -9,7 +9,7 @@ import {
   emptyDraft,
   filterCombos,
   groupCombos,
-  intersectComboEfforts,
+  unionComboEfforts,
   isValidComboId,
   jevAutoDraft,
   parseComboList,
@@ -336,54 +336,50 @@ describe("combo-workspace-data", () => {
     expect(filterCombos(items, "gpt-balanced").map((item) => item.id)).toEqual(["balanced"]);
   });
 
-  test("intersectComboEfforts keeps only common advertised efforts (#488)", () => {
+  test("unionComboEfforts combines advertised member efforts", () => {
     const map = new Map<string, readonly string[] | undefined>([
       ["a/m1", ["low", "medium", "high", "ultra"]],
       ["b/m2", ["medium", "high", "xhigh"]],
     ]);
-    expect(intersectComboEfforts(
+    expect(unionComboEfforts(
       [{ provider: "a", model: "m1" }, { provider: "b", model: "m2" }],
       map,
-    )).toEqual(["medium", "high"]);
+    )).toEqual(["low", "medium", "high", "xhigh", "ultra"]);
   });
 
-  test("intersectComboEfforts treats unknown members as picker wildcards", () => {
+  test("unionComboEfforts does not invent efforts for unknown members", () => {
     const map = new Map<string, readonly string[] | undefined>([
       ["a/m1", ["low", "medium"]],
     ]);
-    expect(intersectComboEfforts(
+    expect(unionComboEfforts(
       [{ provider: "a", model: "m1" }, { provider: "b", model: "unknown" }],
       map,
     )).toEqual(["low", "medium"]);
-    expect(intersectComboEfforts(
+    expect(unionComboEfforts(
       [{ provider: "b", model: "unknown" }],
-      map,
-    )).toEqual(COMBO_EFFORTS);
-  });
-
-  test("intersectComboEfforts keeps an advertised empty ladder restrictive", () => {
-    const map = new Map<string, readonly string[] | undefined>([
-      ["a/m1", ["low", "medium"]],
-      ["b/no-reasoning", []],
-    ]);
-    expect(intersectComboEfforts(
-      [{ provider: "a", model: "m1" }, { provider: "b", model: "no-reasoning" }],
       map,
     )).toEqual([]);
   });
 
-  test("intersectComboEfforts drops empty ladders in adaptive mode", () => {
+  test("unionComboEfforts ignores an empty ladder beside a reasoning member", () => {
     const map = new Map<string, readonly string[] | undefined>([
       ["a/m1", ["low", "medium"]],
       ["b/no-reasoning", []],
     ]);
+    expect(unionComboEfforts(
+      [{ provider: "a", model: "m1" }, { provider: "b", model: "no-reasoning" }],
+      map,
+    )).toEqual(["low", "medium"]);
+  });
+
+  test("unionComboEfforts keeps an all-empty picker empty", () => {
+    const map = new Map<string, readonly string[] | undefined>([
+      ["a/m1", []],
+      ["b/no-reasoning", []],
+    ]);
     const targets = [{ provider: "a", model: "m1" }, { provider: "b", model: "no-reasoning" }];
-    // The editor must agree with the served catalog: under adaptive the no-effort target
-    // stops emptying the picker, otherwise the dashboard shows a control the proxy does not.
-    expect(intersectComboEfforts(targets, map, "adaptive")).toEqual(["low", "medium"]);
-    // Explicit strict, and the default argument, both keep today's restrictive behavior.
-    expect(intersectComboEfforts(targets, map, "strict")).toEqual([]);
-    expect(intersectComboEfforts(targets, map)).toEqual([]);
+    expect(unionComboEfforts(targets, map)).toEqual([]);
+    expect(unionComboEfforts([], map)).toEqual(COMBO_EFFORTS);
   });
 
   test("reasoningEffortMode survives parse and serialize", () => {

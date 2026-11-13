@@ -22,18 +22,22 @@ Codex 整合會把 `web_search = "disabled"` 寫入 `~/.codex/config.toml`，這
 指令會回報由此觸發的 Codex 端寫入（`--json` 中的 `codexWebSearch`，否則為結尾的
 `Codex config:` 行），並在無法寫入時提示 `ocx sync`。該旗標對 `vision` 同樣有效。
 
-### `ocx v2 <status|on|off|mode <v1|default|v2>|threads <n>>`
+### `ocx v2 <status|on|off|mode <v1|default|v2|v2-plaintext>|threads <n>>`
 
-管理 Codex 的 `multi_agent_v2` 功能旗標與三態多代理介面模式。
+管理 Codex 的 `multi_agent_v2` 功能旗標與四態多代理介面模式。
 
 | 子指令 | 動作 |
 | --- | --- |
 | `status`（預設） | 回報目前 v2 旗標、多代理模式與執行緒並行數。 |
-| `on` | 啟用 `multi_agent_v2` 功能並重新同步目錄。 |
+| `on` | 啟用 `multi_agent_v2` 功能並重新同步目錄；`v2-plaintext` 或混合 pin 生效時會拒絕，因為全域強制會蓋過目錄 pin。 |
 | `off` | 停用 `multi_agent_v2` 功能並重新同步目錄。 |
 | `mode v1` | 將所有模型強制為 v1、停用原生 v2，並保留現用執行緒上限。 |
 | `mode default` | 遵循上游模型介面 pin。 |
-| `mode v2` | 將所有模型強制為 v2、啟用原生 v2，並保留現用執行緒上限。 |
+| `mode v2` | 將所有模型設為 v2 並保留執行緒上限；`keep-native-v1` 關閉時啟用全域原生 v2，開啟時關閉全域強制並使用目錄 pin。 |
+| `mode v2-plaintext --acknowledge-plaintext-agent-messages` | 為新工作階段選擇 V2、關閉全域強制，並以明文傳遞符合條件的工作。進入需要 `--acknowledge-plaintext-agent-messages`。 |
+| `keep-native-v1 on\|off` | 在 `mode v2` 下讓原生 ChatGPT 使用 v1、路由模型使用 v2；啟用時關閉全域 V2 強制。 |
+| `mode-hint <text>` | 為所有模型與推理強度設定主動委派提示。 |
+| `mode-hint --clear` | 移除提示，恢復依推理強度決定的策略。 |
 | `threads <n>` | 將現用 v1/v2 執行緒上限設為不小於 1 的整數。 |
 
 ```bash
@@ -44,7 +48,7 @@ ocx v2 on
 ocx v2 threads 16
 ```
 
-`mode` 子指令將 `multiAgentMode` 寫入 opencodex 設定並重新同步 Codex 目錄。模式與旗標轉換會在有效的 v1/v2 Codex key 之間移動目前的數值執行緒上限；失敗的轉換會還原原始的 `config.toml`。變更套用於新的 Codex session，執行中的 session 則保留其 pin 的介面。
+`mode` 子指令將 `multiAgentMode` 寫入 opencodex 設定並重新同步 Codex 目錄。模式與旗標轉換會在有效的 v1/v2 Codex key 之間移動目前的數值執行緒上限；失敗的轉換會還原原始的 `config.toml`。目錄介面變更套用於新的 Codex session，執行中的 session 則保留其 pin；啟用明文編譯也會影響既有 V2 session 的後續合格請求。Subagents 的 Ultra 開啟開關需要已啟用原生功能且模式為 `v2`，或選擇 `v2-plaintext`（其全域強制保持關閉）；僅執行 `ocx v2 on` 不符合條件。
 
 ## 組合路由
 
@@ -256,7 +260,7 @@ ocx system settings --stream-mode eager-relay
 ocx system codex-cli-update check --json
 ```
 
-`check` 不查詢註冊表，也不執行 Codex。在 POSIX 上，當已發布啟動器擷取的環境候選項與執行階段解析器選擇的正規路徑相同時，`selectionAttested` 可以為 `true`；若關聯的 npm-global 套件資訊清單證明了所有權，`managed` 可以為 `true`。持久化候選項仍不獲認證。Windows x64 也支援經證明繫結的絕對路徑標準 npm `codex.cmd`，以及由持有控制代碼繫結的 Node/npm 工具鏈（存在時為前綴本機，確認不存在時為錨定到啟動器架構的已擷取 PATH 配對）和已驗證的前綴內平台支援元件，並使用拒絕重新剖析的持有控制代碼。其他 Windows 配置仍然延後或不受管理。Windows 的 `managed` 結果僅對觀測到的安裝配置進行分類：繫結的 Node/npm 是更新器的唯讀中繼資料工具鏈，並不保證後續 `codex.cmd` 呼叫將解析到哪個直譯器。直接透過 Bun 或原始碼執行時沒有啟動器證明。`plan` 使用隔離的暫存 npm 設定、快取和日誌查詢官方註冊表，並拒絕活動工作階段或不完整的程序觀測。它不安裝軟體，也不向程序傳送訊號。Windows x64 的 apply 需要具備經過驗證的私人寫入權限的受限 npm 前綴，並保留無關的套件和 shim；不受支援的已觀測配置回傳 `applicable: false` 且 `refusal: windows_apply_disabled`；僅 PATH 選取、OpenCodex 自動啟動包裝器和 global/vendor 後援仍然延後。請參閱[完整命令與拒絕原因（英文）](/reference/cli/agents/#read-only-codex-cli-update-plan)。
+`check` 不查詢註冊表，也不執行 Codex。在 POSIX 上，當已發布啟動器擷取的環境候選項與執行階段解析器選擇的正規路徑相同時，`selectionAttested` 可以為 `true`；若關聯的 npm-global 套件資訊清單證明了所有權，且在回報候選版本時該版本與資訊清單版本一致，`managed` 可以為 `true`。持久化候選項仍不獲認證。Windows x64 也支援經證明繫結的絕對路徑標準 npm `codex.cmd`，以及由持有控制代碼繫結的 Node/npm 工具鏈（存在時為前綴本機，確認不存在時為錨定到啟動器架構的已擷取 PATH 配對）和已驗證的前綴內平台支援元件，並使用拒絕重新剖析的持有控制代碼。其他 Windows 配置仍然延後或不受管理。Windows 的 `managed` 結果僅對觀測到的安裝配置進行分類：繫結的 Node/npm 是更新器的唯讀中繼資料工具鏈，並不保證後續 `codex.cmd` 呼叫將解析到哪個直譯器。直接透過 Bun 或原始碼執行時沒有啟動器證明。`plan` 使用隔離的暫存 npm 設定、快取和日誌查詢官方註冊表，並拒絕活動工作階段或不完整的程序觀測。它不安裝軟體，也不向程序傳送訊號。Windows x64 的 apply 需要具備經過驗證的私人寫入權限的受限 npm 前綴，並保留無關的套件和 shim；不受支援的已觀測配置回傳 `applicable: false` 且 `refusal: windows_apply_disabled`；僅 PATH 選取、OpenCodex 自動啟動包裝器和 global/vendor 後援仍然延後。請參閱[完整命令與拒絕原因（英文）](/reference/cli/agents/#read-only-codex-cli-update-plan)。
 
 在 Windows 上，如果擷取到 `CODEX_CLI_PATH=codex` 這類單純命令名稱、遠端路徑或裝置路徑，則回報 `candidate_path_unavailable`。這些情況已有擷取的候選項，但其路徑不適用於此檢查。
 

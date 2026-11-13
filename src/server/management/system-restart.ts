@@ -54,6 +54,7 @@ import { withSiblingMarker } from "../../codex/sibling-start";
 import { issueSiblingHandoff } from "../../codex/sibling-handoff";
 import { readRuntimePort } from "../../config/process-state";
 import { spendLedgerRestartEnvironment } from "../../lib/spend-ledger-owner";
+import { SUPERVISOR_MARKER_ENVS } from "../../lib/supervisor-markers";
 import {
   DESKTOP_RESTART_EXIT_CODE,
   DESKTOP_SUPERVISED_ENV,
@@ -61,6 +62,7 @@ import {
   isDesktopSupervised,
 } from "../../lib/system-restart-contract";
 import { spawnReplacementStart } from "../restart-replacement";
+import { retireRestartParentOwnership } from "../restart-parent-ownership";
 
 export { MEMORY_DRAIN_RESTART_MS, REPLACEMENT_READY_TIMEOUT_MS } from "../../lib/system-restart-contract";
 export { waitForReplacementReady, type ReplacementReadinessIo } from "../restart-replacement";
@@ -274,8 +276,9 @@ export function replacementStartEnvironment(
   // A sibling's replacement stays a sibling even if the owner is down while it probes.
   const sourceEnv: NodeJS.ProcessEnv = withSiblingMarker(process.env, issueSiblingHandoff);
   delete sourceEnv.OCX_SERVICE;
-  // A detached replacement is not the desktop app's child; it must never exit to an app that is not waiting on it.
-  delete sourceEnv[DESKTOP_SUPERVISED_ENV];
+  // A detached replacement is not the desktop app's child, nor a service manager's or the Windows
+  // wrapper's; it must never exit to a supervisor that is not waiting on it.
+  for (const name of SUPERVISOR_MARKER_ENVS) delete sourceEnv[name];
   return spendLedgerRestartEnvironment(
     sourceEnv,
     waitForHealthBeforeParentExit ? undefined : parentPid,
@@ -289,6 +292,9 @@ function spawnDetachedStart(
   let env: NodeJS.ProcessEnv;
   try {
     env = replacementStartEnvironment(waitForHealthBeforeParentExit);
+    // Prepare the sibling handoff while its runtime record still exists. Only completed
+    // drain + listener stop may release parent ownership before waiting for child health.
+    if (waitForHealthBeforeParentExit) retireRestartParentOwnership(port);
   } catch (err) {
     return Promise.reject(err);
   }

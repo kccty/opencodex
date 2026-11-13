@@ -45,7 +45,7 @@ import {
   type SubprocessDeadlineScheduler,
 } from "./bounded-subprocess";
 import { resolveTrustedWindowsIcaclsExe } from "./windows-elevation";
-import { verifyWindowsPrivateEntries, verifyWindowsPrivateEntriesAsync } from "./windows-owner-acl";
+import { verifyWindowsEntriesAcl, verifyWindowsEntriesAclAsync, verifyWindowsPrivateEntries, verifyWindowsPrivateEntriesAsync } from "./windows-owner-acl";
 import {
   cachedCurrentWindowsIdentity,
   resolveCurrentWindowsPrincipal,
@@ -268,6 +268,8 @@ export interface HardenResult {
 
 export interface HardenOptions {
   required: boolean;
+  /** Inspect an existing runtime directory's private DACL, allowing an enabled Admin owner. */
+  verifyExistingRuntimeDirectory?: boolean;
   /**
    * Explicit total budget for this harden call. Shutdown recovery uses a reduced
    * caller-owned slice instead of opening the normal 30-second window.
@@ -658,10 +660,10 @@ export function windowsSecretAclReapPendingForPath(targetPath: string): boolean 
 }
 
 /** Non-blocking removal guard for callers that must refuse rather than wait for a stuck child. */
-export function windowsSecretAclReapPendingAtOrBelow(rootPath: string): boolean {
+export function windowsSecretAclReapPendingAtOrBelow(rootPath: string, includeAncestors = false): boolean {
   const root = captureRemovalIdentity(rootPath);
   return [...activeAsyncAclWork.values(), ...pendingAsyncIcaclsReaps.values()]
-    .some(entries => [...entries].some(entry => retainedWorkIsAtOrBelow(entry, root)));
+    .some(entries => [...entries].some(entry => retainedWorkIsAtOrBelow(entry, root, includeAncestors)));
 }
 
 /**
@@ -1002,7 +1004,14 @@ function shouldVerifyExistingAcl(): boolean {
   return env["OPENCODEX_ACL_VERIFY_EXISTING"] === "1";
 }
 
-function existingAclAlreadyCompliant(targetPath: string, directory: boolean, deadline: number): boolean {
+function existingAclAlreadyCompliant(targetPath: string, directory: boolean, deadline: number, strictDirectory = false): boolean {
+  if (strictDirectory) {
+    const before = observe(targetPath);
+    const verified = verifyWindowsEntriesAcl([{ path: targetPath, directory: true, policy: "private-runtime-directory" }], deadline - nowFn());
+    const after = observe(targetPath);
+    // No name-only fallback or success memo: this proof belongs to this observation only.
+    return verified && before !== null && after !== null && sameObservation(before, after) && nowFn() < deadline;
+  }
   if (!shouldVerifyExistingAcl()) return false;
   const identity = cachedCurrentWindowsIdentity();
   if (!identity) return false;
@@ -1027,7 +1036,14 @@ async function existingAclAlreadyCompliantAsync(
   targetPath: string,
   directory: boolean,
   deadline: number,
+  strictDirectory = false,
 ): Promise<boolean> {
+  if (strictDirectory) {
+    const before = observe(targetPath);
+    const verified = await verifyWindowsEntriesAclAsync([{ path: targetPath, directory: true, policy: "private-runtime-directory" }], deadline - nowFn());
+    const after = observe(targetPath);
+    return verified && before !== null && after !== null && sameObservation(before, after) && nowFn() < deadline;
+  }
   if (!shouldVerifyExistingAcl()) return false;
   const identity = cachedCurrentWindowsIdentity();
   if (!identity) return false;
@@ -1191,37 +1207,55 @@ function isTimeoutError(error: unknown): boolean {
  * which is optional and simply omitted when it is not an allowlisted code.
  */
 function sanitizeAclFailure(cause: unknown): AclFailureDiagnostics | undefined {
-  if (!cause || typeof cause !== "object" || !("aclFailure" in cause)) return undefined;
-  const raw = (cause as { aclFailure?: unknown }).aclFailure;
-  if (!raw || typeof raw !== "object") return undefined;
-  const f = raw as Record<string, unknown>;
-  if (typeof f.step !== "string" || !ICACLS_STEPS.has(f.step)) return undefined;
-  if (
-    f.stage !== "deadline_before_spawn" &&
-    f.stage !== "spawn_failed" &&
-    f.stage !== "runner_rejected" &&
-    f.stage !== "runner_watchdog" &&
-    f.stage !== "child_result"
-  ) {
+  // Every read off the untrusted cause — the `in` check, the `aclFailure`
+  // access and each field — may be a throwing accessor or a getter that
+  // returns a different value on the next read. Each field is therefore read
+  // exactly once into a local, and only that local is validated and copied;
+  // a read that throws drops the whole record rather than letting a raw
+  // hostile exception replace the sanitized required-mode error.
+  try {
+    if (!cause || typeof cause !== "object" || !("aclFailure" in cause)) return undefined;
+    const raw = (cause as { aclFailure?: unknown }).aclFailure;
+    if (!raw || typeof raw !== "object") return undefined;
+    const f = raw as Record<string, unknown>;
+    const step = f.step;
+    if (typeof step !== "string" || !ICACLS_STEPS.has(step)) return undefined;
+    const stage = f.stage;
+    if (
+      stage !== "deadline_before_spawn" &&
+      stage !== "spawn_failed" &&
+      stage !== "runner_rejected" &&
+      stage !== "runner_watchdog" &&
+      stage !== "child_result"
+    ) {
+      return undefined;
+    }
+    const elapsedMs = f.elapsedMs;
+    if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs)) return undefined;
+    const budgetMs = f.budgetMs;
+    if (typeof budgetMs !== "number" || !Number.isFinite(budgetMs)) return undefined;
+    const success = f.success;
+    if (typeof success !== "boolean") return undefined;
+    const timedOut = f.timedOut;
+    if (typeof timedOut !== "boolean") return undefined;
+    const exitCode = f.exitCode;
+    if (exitCode !== null && (typeof exitCode !== "number" || !Number.isFinite(exitCode))) {
+      return undefined;
+    }
+    const spawnErrorCode = allowlistedSpawnErrorCode(f.spawnErrorCode);
+    return {
+      step: step as IcaclsStep,
+      stage,
+      elapsedMs,
+      budgetMs,
+      success,
+      exitCode: exitCode as number | null,
+      timedOut,
+      ...(spawnErrorCode !== undefined ? { spawnErrorCode } : {}),
+    };
+  } catch {
     return undefined;
   }
-  if (typeof f.elapsedMs !== "number" || !Number.isFinite(f.elapsedMs)) return undefined;
-  if (typeof f.budgetMs !== "number" || !Number.isFinite(f.budgetMs)) return undefined;
-  if (typeof f.success !== "boolean" || typeof f.timedOut !== "boolean") return undefined;
-  if (f.exitCode !== null && (typeof f.exitCode !== "number" || !Number.isFinite(f.exitCode))) {
-    return undefined;
-  }
-  const spawnErrorCode = allowlistedSpawnErrorCode(f.spawnErrorCode);
-  return {
-    step: f.step as IcaclsStep,
-    stage: f.stage,
-    elapsedMs: f.elapsedMs,
-    budgetMs: f.budgetMs,
-    success: f.success,
-    exitCode: f.exitCode as number | null,
-    timedOut: f.timedOut,
-    ...(spawnErrorCode !== undefined ? { spawnErrorCode } : {}),
-  };
 }
 
 /** Preserve only the bounded machine-readable cause on a sanitized public error. */
@@ -1358,7 +1392,7 @@ function hardenEntry(
   if (memoSatisfied(cache, targetPath)) return { ok: true };
   const deadline = nowFn() + resolveHardenDeadlineMs(opts.deadlineMs);
   // Secret compliance does not prove the extra read grants required by a staged payload.
-  if (extraReadAces.length === 0 && existingAclAlreadyCompliant(targetPath, directory, deadline)) return { ok: true };
+  if (extraReadAces.length === 0 && existingAclAlreadyCompliant(targetPath, directory, deadline, directory && opts.verifyExistingRuntimeDirectory === true)) return { ok: true };
   const memoKey = timeoutMemoKey(targetPath, opts);
   const timeoutMemoError = timeoutMemoErrorIfBlocked(memoKey, opts);
   if (timeoutMemoError) {
@@ -1423,7 +1457,7 @@ async function runHardenEntryAsync(
   extraReadAces: readonly string[],
 ): Promise<HardenResult> {
   const deadline = nowFn() + resolveHardenDeadlineMs(opts.deadlineMs);
-  if (extraReadAces.length === 0 && await existingAclAlreadyCompliantAsync(targetPath, directory, deadline)) return { ok: true };
+  if (extraReadAces.length === 0 && await existingAclAlreadyCompliantAsync(targetPath, directory, deadline, directory && opts.verifyExistingRuntimeDirectory === true)) return { ok: true };
   const memoKey = timeoutMemoKey(targetPath, opts);
   const timeoutMemoError = timeoutMemoErrorIfBlocked(memoKey, opts);
   if (timeoutMemoError) {
