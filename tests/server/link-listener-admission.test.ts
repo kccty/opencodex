@@ -285,10 +285,10 @@ describe("hub-link admission", () => {
       } as OcxConfig);
       server = startServer(0);
 
-      // Public listener on standalone still has no hub-state surface (401 before admission, 404 after).
+      // The credentialless public listener still has no standalone hub-state surface.
       const publicAnon = await fetch(new URL("/v1/hub-state", server.url));
-      expect(publicAnon.status).toBe(401);
-      expect(await publicAnon.text()).not.toContain("hub_state_not_a_hub");
+      expect(publicAnon.status).toBe(404);
+      expect(await publicAnon.json()).toMatchObject({ error: { code: "hub_state_not_a_hub" } });
       const publicAuthed = await fetch(new URL("/v1/hub-state", server.url), { headers: headers(LINKED_KEY) });
       expect(publicAuthed.status).toBe(404);
       expect(await publicAuthed.json()).toMatchObject({ error: { code: "hub_state_not_a_hub" } });
